@@ -1,0 +1,61 @@
+[project]
+name = "catan"
+version = "0.1.0"
+description = "Catan rules engine, belief-tracking players, RL/search agents and a simulation platform"
+readme = "README.md"
+authors = [
+    { name = "vehnil", email = "vehnilrangaraman@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "gymnasium>=1.4.0",
+    "numpy>=2.5.4",
+    "openskill>=6.2.0",
+    "pettingzoo>=1.27.0",
+    "pydantic>=2.14.3",
+    "pyyaml>=6.0.3",
+    "safetensors>=0.8.0",
+    "torch>=2.15.0",
+    "typer>=0.29.0",
+]
+
+[project.scripts]
+catan = "catan.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-q"
+markers = ["slow: long-running simulation tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501", "E741"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.15",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]
+
+[tool.uv]
+# macOS can set the "hidden" flag on files inside .venv, and Python skips hidden .pth
+# files, which silently breaks the editable install. `uv run --no-editable` (or
+# UV_NO_EDITABLE=1) installs a regular copy instead; these keys make uv rebuild that
+# copy whenever a source file changes.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]

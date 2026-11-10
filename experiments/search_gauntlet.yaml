@@ -1,0 +1,8 @@
+# One search agent per game against a pool of greedy variants. Slow: keep games modest.
+name: ismcts_gauntlet
+format: gauntlet
+candidate: ismcts:iterations=100,max_depth=6
+agents: [greedy, "greedy:preset=expansion", "greedy:preset=cities"]
+games: 40
+workers: 8
+seed: 2

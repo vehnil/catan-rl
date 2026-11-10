@@ -1,0 +1,8 @@
+# Sanity check: greedy should beat random by a wide margin (chance level is 25%).
+name: baselines
+format: fixed
+agents: [greedy, random, random, random]
+games: 100
+workers: 8
+seed: 0
+save_replays: true

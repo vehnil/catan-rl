@@ -1,0 +1,14 @@
+# Every 4-agent lineup of the heuristic strategy presets plus the bandit agents, seats rotated.
+name: strategies
+format: round_robin
+agents:
+  - greedy
+  - greedy:preset=expansion
+  - greedy:preset=cities
+  - greedy:preset=development
+  - opening_bandit:budget=32
+games: 200
+workers: 8
+seed: 1
+rules:
+  board: random

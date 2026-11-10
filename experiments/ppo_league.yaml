@@ -1,0 +1,21 @@
+# Longer self-play run: PPO vs. random/greedy and its own past snapshots.
+name: ppo_league
+seed: 0
+rules:
+  board: random
+ppo:
+  total_steps: 2000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+league:
+  fixed_opponents: [random, greedy]
+  snapshot_every: 100000
+  max_snapshots: 8
+  self_play_prob: 0.5
+eval_every: 200000
+eval_games: 40
+eval_opponents: [greedy, greedy, greedy]

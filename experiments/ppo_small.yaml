@@ -1,0 +1,19 @@
+# Short PPO smoke run: learner vs. random opponents, a few snapshots for self-play.
+name: ppo_small
+seed: 0
+ppo:
+  total_steps: 20000
+  rollout_steps: 2048
+  minibatch: 256
+  epochs: 4
+  lr: 0.0003
+  hidden: [256, 256]
+  vp_reward_scale: 0.05
+league:
+  fixed_opponents: [random]
+  snapshot_every: 5000
+  max_snapshots: 3
+  self_play_prob: 0.25
+eval_every: 10000
+eval_games: 20
+eval_opponents: [random, random, random]

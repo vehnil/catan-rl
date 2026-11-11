@@ -63,4 +63,13 @@ for s in stage1_3random stage2_2random_1greedy stage3_1random_2greedy stage4_3gr
 done
 ```
 
-Results: not run yet.
+Results (8 workers, about 2,600 steps/s):
+
+| Stage | Run → policy | Final eval vs its lineup |
+|---|---|---|
+| `stage1_3random` | `c2e62f657fc9` → `91194c26a7` | 95% wins, 10.0 VP (under 3 minutes) |
+| `stage2_2random_1greedy` | `7feeb985b7ed` → `774c176a44` | 2.5% wins, 4.1 VP |
+| `stage3_1random_2greedy` | `513e4781886c` | stopped by hand after about 12k steps |
+| `stage4_3greedy` | | not run |
+
+Stage 2 stalled. Wins stayed at 0–2.5% and VP at about 3.2–3.5 for all 1M steps, while entropy rose from 1.62 to 1.89. Greedy cashes in on the random players' mistakes and ends the game around turn 60, long before the policy reaches 10 VP. So the policy loses every game, the value head learns "I lose", and only the small VP reward is left. More greedy players would only make that worse, so the ladder was stopped.

@@ -127,3 +127,29 @@ def test_greedy_prefers_city_over_ending_turn():
     agent = GreedyAgent()
     agent.reset(0, np.random.default_rng(0))
     assert agent.act(observe(g.state, 0)) == encode(ActionType.BUILD_CITY, 20)
+
+
+def test_evaluate_hands_matches_evaluate():
+    from catan.agents.heuristics import PRESETS, evaluate, evaluate_hands
+    from catan.engine import Game, legal_actions
+
+    rng = np.random.default_rng(7)
+    checked = 0
+    for seed in range(6):
+        g = Game(seed, RulesConfig())
+        while not g.done:
+            g.step(int(rng.choice(legal_actions(g.state))))
+            if rng.random() > 0.05:
+                continue
+            for p in range(4):
+                hands = g.state.hands[p] + rng.integers(-2, 4, size=(12, 5))
+                hands = np.maximum(hands, 0)
+                for w in PRESETS.values():
+                    expected = []
+                    for h in hands:
+                        s = g.state.clone()
+                        s.hands[p] = h
+                        expected.append(evaluate(s, p, w))
+                    assert evaluate_hands(g.state, p, hands, w).tolist() == expected
+                    checked += 1
+    assert checked > 100

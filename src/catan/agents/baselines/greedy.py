@@ -19,6 +19,7 @@ from catan.agents.heuristics import (
     PRESETS,
     Weights,
     evaluate,
+    evaluate_hands,
     robber_hex_score,
     vertex_pips,
     vertex_score,
@@ -243,17 +244,16 @@ class GreedyAgent(Agent):
         offers = np.flatnonzero(mask[block(ActionType.PROPOSE_TRADE)])
         if len(offers) == 0:
             return None
-        o = block(ActionType.PROPOSE_TRADE).start
-        best, best_gain = None, self.accept_margin * 2
-        for i in offers:
-            if OFFER_GIVE[i].sum() < OFFER_GET[i].sum():
-                continue  # don't ask for a lopsided deal nobody will take
-            s = state.clone()
-            s.hands[me] += OFFER_GET[i] - OFFER_GIVE[i]
-            gain = evaluate(s, me, self.w) - base
-            if gain > best_gain:
-                best, best_gain = o + int(i), gain
-        return best
+        # Don't ask for a lopsided deal nobody will take.
+        offers = offers[OFFER_GIVE[offers].sum(axis=1) >= OFFER_GET[offers].sum(axis=1)]
+        if len(offers) == 0:
+            return None
+        hands = state.hands[me] + OFFER_GET[offers] - OFFER_GIVE[offers]
+        gains = evaluate_hands(state, me, hands, self.w) - base
+        i = int(np.argmax(gains))  # first of equal gains, like a strict-improvement scan
+        if gains[i] > self.accept_margin * 2:
+            return block(ActionType.PROPOSE_TRADE).start + int(offers[i])
+        return None
 
     def _robber_hurts_me(self, state: GameState, me: int) -> bool:
         return any(state.vertex_owner[v] == me for v in TOPOLOGY.hex_vertices[state.robber]) and (

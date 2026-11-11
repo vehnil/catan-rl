@@ -153,6 +153,53 @@ def evaluate(state: GameState, p: int, w: Weights = DEFAULT_WEIGHTS) -> float:
     return float(v)
 
 
+def evaluate_hands(
+    state: GameState, p: int, hands: np.ndarray, w: Weights = DEFAULT_WEIGHTS
+) -> np.ndarray:
+    """``evaluate`` for each row of ``hands`` (K, 5) as ``p``'s hand, bit-for-bit.
+
+    Only goal progress and the discard penalty depend on the hand, so the rest
+    is computed once. The operations mirror ``evaluate`` in the same order;
+    ``test_evaluate_hands_matches_evaluate`` keeps the two in sync.
+    """
+    if state.winner >= 0:
+        return np.full(len(hands), 1e6 if state.winner == p else -1e6)
+    prod = production(state, p)
+    v = w.vp * state.total_vp(p)
+    v += w.production * prod.sum() + w.diversity * (prod > 0).sum()
+
+    owned = state.vertex_owner[:NUM_VERTICES] == p
+    can_city = state.cities_left[p] > 0 and (state.vertex_level[:NUM_VERTICES][owned] == 1).any()
+    spots: np.ndarray = (
+        np.flatnonzero(settlement_mask(state, p))
+        if state.settlements_left[p] > 0
+        else np.zeros(0, np.int64)
+    )
+    goals = [(COST_DEV, 0.6)]
+    if can_city:
+        goals.append((COST_CITY, 1.0))
+    if state.settlements_left[p] > 0:
+        goals.append((COST_SETTLEMENT, 1.0 if len(spots) else 0.4))
+    if state.roads_left[p] > 0:
+        goals.append((COST_ROAD, 0.4))
+    progress = np.max(
+        [np.minimum(hands, cost).sum(axis=1) / cost.sum() * weight for cost, weight in goals],
+        axis=0,
+    )
+    vals = v + w.goal_progress * progress
+
+    n = hands.sum(axis=1)
+    over = n > state.config.discard_limit
+    vals = np.where(over, vals - w.over_limit * (n - state.config.discard_limit), vals)
+    devs = state.dev_hand[p] + state.dev_new[p]
+    vals = vals + w.dev_card * (devs.sum() - devs[DevCard.VICTORY_POINT])
+    vals = vals + w.knight * state.knights[p]
+    vals = vals + w.road * min(int(state.road_length[p]), 8)
+    if len(spots):
+        vals = vals + w.best_spot * vertex_pips(state.board, state.robber)[spots].sum(axis=1).max()
+    return vals
+
+
 def evaluate_all(state: GameState, w: Weights = DEFAULT_WEIGHTS) -> np.ndarray:
     """Utility vector for every seat (used by Max^n)."""
     return np.array([evaluate(state, p, w) for p in range(NUM_PLAYERS)])

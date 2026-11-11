@@ -1,4 +1,5 @@
-# Stage 2 of 2 (draft; revisit after stage 1): each learner against the other three, frozen.
+# Stage 2 of 2: each learner against the other three (frozen), with ~25% random seats mixed in
+# against overfitting (each seat drawn from the three peers + random).
 # All four learners use identical settings (v5 learner C's); only the seed differs.
 # Only the learner trains. See ../README.md.
 name: v6_stage2_s4
@@ -17,10 +18,11 @@ ppo:
   fast_win_turns: 200
   num_envs: 2
 league:
-  fixed_opponents: [policy:v6_stage1_s1, policy:v6_stage1_s2, policy:v6_stage1_s3]
-  lineup: true
+  fixed_opponents: [policy:v6_stage1_s1, policy:v6_stage1_s2, policy:v6_stage1_s3, random]  # pool: each seat drawn uniformly
+  lineup: false
   self_play_prob: 0.0
   snapshot_every: 10000000  # unused without self-play
 eval_every: 100000
 eval_games: 40
+checkpoint_every: 200000  # for `catan curve` (overfitting check)
 eval_opponents: [policy:v6_stage1_s1, policy:v6_stage1_s2, policy:v6_stage1_s3]

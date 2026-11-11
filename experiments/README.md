@@ -201,7 +201,7 @@ Questions for stage 1:
 - **How much do identical learners differ by seed alone?** v5's four settings ended up close against random and greedy but far apart in the round-robin. If v6's seeds spread just as widely, v5's differences were mostly luck.
 - **Is C's round-robin strength real?**
 
-Stage 2 is a draft, to revisit after stage 1. One option from [findings](../notes/findings.md) H3 is to keep about 20% random seats alongside the frozen peers, to avoid overfitting to them.
+In stage 2, each seat is drawn from a pool of the three peers plus `random`, so about 25% of seats are random. This mixing is meant to avoid overfitting to the peers ([findings](../notes/findings.md) H3). Stage 2 also saves a checkpoint every 200k steps.
 
 Run one stage at a time, then compare the four (the greedy yardstick plus a round-robin with v5 C and v4 PPO v2) before the next:
 
@@ -211,4 +211,41 @@ for l in s1 s2 s3 s4; do
 done; wait
 ```
 
-Results: not run yet.
+#### Stage 1 results (about 12 minutes)
+
+Evals against 3× random, as wins / turns. Identical settings; only the seed differs:
+
+| Learner | 100k | 200k | 300k | 400k | 500k | Policy |
+|---|---|---|---|---|---|---|
+| s1 | 47.5% / 252 | 72.5% / 233 | 90% / 173 | 97.5% / 144 | 95% / 130 | `7d8befad98` |
+| s2 | 85% / 189 | 97.5% / 149 | 92.5% / 143 | 95% / 127 | 100% / 124 | `caa237bc46` |
+| s3 | 70% / 213 | 97.5% / 155 | 97.5% / 138 | 95% / 140 | 97.5% / 111 | `89ab7f7aa7` |
+| s4 | 80% / 243 | 100% / 164 | 100% / 142 | 97.5% / 148 | 100% / 134 | `15b6f5bc65` |
+
+The yardstick (200 games, same seeds as v3–v5):
+
+| Policy | + 2 random + greedy | + 3 greedy |
+|---|---|---|
+| s1 | 3.0%, 4.40 VP | 0%, 3.18 VP |
+| s2 | 3.0%, 4.54 VP | 0%, 3.34 VP |
+| s3 | 3.0%, 4.74 VP | 0.5%, 3.27 VP |
+| s4 | 3.5%, 4.42 VP | 0%, 3.39 VP |
+
+Round-robin of the four, v5 C and v4 PPO v2 (480 games): PPO v2 58.4% [53–64%], v5 C 40.3% [35–46%], s3 19.4%, s2 13.1%, s4 10.3%, s1 8.4%.
+
+- **Seed alone spreads early learning widely** (47.5–85% at 100k, compared with v5's 37.5–52.5% across different settings), but all four end close together.
+- **Against greedy, seeds span 4.40–4.74 VP.** That covers v5 A, B and C, so v5's setting changes made no measurable difference there.
+- **C's round-robin lead didn't reproduce.** Four seeds with exactly C's settings won 8–19%, against v5 C's 40%. C's seed was lucky; one seed per setting isn't enough.
+- **Self-play is still strongest against PPO opponents:** PPO v2 tops the round-robin. It doesn't help against greedy.
+
+#### Measuring overfitting in stage 2
+
+Run `catan curve v6_stage2_sX` on each learner, playing every policy against four fixed lineups:
+- **peers:** its three stage-1 peers, the opponents it trains on.
+- **unseen PPO:** v5 A, v5 C and v4 PPO v2, which it never trains against.
+- **greedy mix:** 2 random + greedy.
+- **3× random.**
+
+The policies are its stage-1 starting point ("pre"), each 200k checkpoint, and the final policy ("post"). Overfitting shows up as the peers score rising while the held-out scores flatten or fall.
+
+Stage 2 results: not run yet.

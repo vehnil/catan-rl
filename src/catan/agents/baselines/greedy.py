@@ -64,6 +64,7 @@ class GreedyAgent(Agent):
         weights: Weights | dict[str, float] = DEFAULT_WEIGHTS,
         max_proposals: int = 1,
         accept_margin: float = 2.0,
+        max_partner_edge: float = 0.0,
         epsilon: float = 0.0,
         preset: str | None = None,
     ) -> None:
@@ -73,6 +74,9 @@ class GreedyAgent(Agent):
         self.w = Weights(**weights) if isinstance(weights, dict) else weights
         self.max_proposals = max_proposals
         self.accept_margin = accept_margin
+        # Reject offers where the proposer's estimated gain exceeds ours by more than this.
+        # math.inf restores the old self-only acceptance rule.
+        self.max_partner_edge = max_partner_edge
         self.epsilon = epsilon  # exploration (useful as a rollout policy)
 
     def config(self) -> dict[str, Any]:
@@ -80,6 +84,7 @@ class GreedyAgent(Agent):
             "weights": self.w.to_dict(),
             "max_proposals": self.max_proposals,
             "accept_margin": self.accept_margin,
+            "max_partner_edge": self.max_partner_edge,
             "epsilon": self.epsilon,
         }
 
@@ -176,10 +181,23 @@ class GreedyAgent(Agent):
             return reject
         if not (state.hands[me] >= OFFER_GET[t.offer]).all():
             return reject
+        give, get = OFFER_GIVE[t.offer], OFFER_GET[t.offer]
         s = state.clone()
-        s.hands[me] += OFFER_GIVE[t.offer] - OFFER_GET[t.offer]
+        s.hands[me] += give - get
         gain = evaluate(s, me, self.w) - evaluate(state, me, self.w)
-        return accept if gain > self.accept_margin else reject
+        if gain <= self.accept_margin:
+            return reject
+        if self.max_partner_edge == np.inf:
+            return accept
+        if get.sum() > give.sum():
+            return reject  # the same rule greedy follows when proposing
+        # The proposer's hand is a guess; it must at least hold what it offers.
+        before = state.clone()
+        before.hands[t.proposer] = np.maximum(before.hands[t.proposer], give)
+        after = before.clone()
+        after.hands[t.proposer] += get - give
+        their_gain = evaluate(after, t.proposer, self.w) - evaluate(before, t.proposer, self.w)
+        return accept if their_gain - gain <= self.max_partner_edge else reject
 
     def _confirm(self, state: GameState, legal: np.ndarray, me: int) -> int:
         confirms = [a for a in legal if decode(int(a)).type == ActionType.CONFIRM_TRADE]

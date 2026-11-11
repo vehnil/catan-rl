@@ -63,7 +63,13 @@ One-step lookahead on its best guess of the state (opponents' hands filled in fr
 - **Robber:** maximize damage to opponents' production (weighted by their VP), never block yourself. Steal from the VP leader.
 - **Discard:** the card whose loss hurts `evaluate` least.
 - **Dev plays:** knight if the robber blocks you or largest army is one knight away; monopoly when opponents are expected to hold ≥ 3 of a resource (from the belief tracker); road building when no settlement spot is reachable.
-- **Trading:** propose the offer that most improves your position (at most `max_proposals` per turn). Accept if your evaluation improves by more than `accept_margin` and the proposer isn't within 2 VP of winning. Confirm with the lowest-VP acceptor.
+- **Trading:** propose the offer that most improves your position, never asking for more cards than you give (at most `max_proposals` per turn). Accept only if all of these hold:
+  - the proposer isn't within 2 VP of winning;
+  - your evaluation improves by more than `accept_margin`;
+  - the offer doesn't ask for more cards than it gives;
+  - the proposer's estimated gain (by your evaluation, on your guess of their hand) is no more than `max_partner_edge` above yours (default 0).
+
+  Confirm with the lowest-VP acceptor. `max_partner_edge=inf` restores the older self-only acceptance rule, which a PPO policy learned to exploit with 1-for-2 offers.
 
 Beats 3× random in 100/100 games, averaging about 62 turns.
 

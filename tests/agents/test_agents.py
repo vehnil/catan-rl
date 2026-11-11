@@ -129,6 +129,60 @@ def test_greedy_prefers_city_over_ending_turn():
     assert agent.act(observe(g.state, 0)) == encode(ActionType.BUILD_CITY, 20)
 
 
+def _greedy_response(proposer_hand, responder_hand, offer_give, offer_get, **greedy_kwargs):
+    """P0 (settlement at 20) proposes to P1 (settlement at 40); returns P1's greedy decision."""
+    from catan.agents.baselines import GreedyAgent
+    from catan.agents.heuristics import evaluate
+    from catan.engine.actions import ActionType
+    from catan.engine.rules import legal_mask
+    from tests.conftest import give, main_phase_game, place
+    from tests.engine.test_trading import offer_index
+
+    g = main_phase_game()
+    place(g.state, 0, 20)
+    place(g.state, 1, 40)
+    give(g.state, 0, proposer_hand)
+    give(g.state, 1, responder_hand)
+    offer = offer_index(offer_give, offer_get)
+    g.step(encode(ActionType.PROPOSE_TRADE, offer))
+    assert g.state.actor == 1
+
+    def gain(p, delta):
+        s = g.state.clone()
+        s.hands[p] += delta
+        return evaluate(s, p) - evaluate(g.state, p)
+
+    give_v, get_v = np.array(offer_give), np.array(offer_get)
+    gains = {"proposer": gain(0, get_v - give_v), "responder": gain(1, give_v - get_v)}
+    agent = GreedyAgent(**greedy_kwargs)
+    agent.reset(1, np.random.default_rng(0))
+    action = agent.act_state(g.state, legal_mask(g.state), 1)
+    return action == encode(ActionType.ACCEPT_TRADE), gains
+
+
+def test_greedy_rejects_offers_asking_for_more_cards():
+    # P0 offers 1 ore for 2 wood; P1 is one ore short of a city and doesn't need wood.
+    args = ([0, 0, 0, 0, 1], [2, 0, 0, 2, 2], [0, 0, 0, 0, 1], [2, 0, 0, 0, 0])
+    accepted, gains = _greedy_response(*args)
+    assert gains["responder"] > 2.0  # the old self-only rule would accept
+    assert not accepted
+    accepted_old, _ = _greedy_response(*args, max_partner_edge=float("inf"))
+    assert accepted_old
+
+
+def test_greedy_rejects_offers_that_help_the_proposer_more():
+    # P0 (9 cards) gives 2 wood for 1 ore: completes a city and gets under the discard limit.
+    # P1 completes a road's worth of cards, a smaller gain.
+    args = ([4, 1, 0, 2, 2], [0, 1, 0, 0, 1], [2, 0, 0, 0, 0], [0, 0, 0, 0, 1])
+    accepted, gains = _greedy_response(*args)
+    assert 2.0 < gains["responder"] < gains["proposer"]
+    assert not accepted
+    accepted_old, _ = _greedy_response(*args, max_partner_edge=float("inf"))
+    assert accepted_old
+    accepted_lenient, _ = _greedy_response(*args, max_partner_edge=100.0)
+    assert accepted_lenient
+
+
 def test_evaluate_hands_matches_evaluate():
     from catan.agents.heuristics import PRESETS, evaluate, evaluate_hands
     from catan.engine import Game, legal_actions

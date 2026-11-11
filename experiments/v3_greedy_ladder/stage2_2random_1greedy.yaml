@@ -1,0 +1,22 @@
+# Stage 2 of 4: one greedy opponent joins two random ones.
+# Exact lineup every game (seats shuffled); no self-play. See ../README.md.
+name: v3_stage2_2random_1greedy
+seed: 1
+init_policy: v3_stage1_3random  # newest policy from the previous stage
+ppo:
+  total_steps: 1000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  num_envs: 8
+league:
+  fixed_opponents: [random, random, greedy]
+  lineup: true
+  self_play_prob: 0.0
+  snapshot_every: 10000000  # unused without self-play
+eval_every: 100000
+eval_games: 40
+eval_opponents: [random, random, greedy]

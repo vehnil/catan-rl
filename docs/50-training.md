@@ -1,0 +1,48 @@
+# Training (PPO self-play)
+
+The trainer runs the learner in `CatanSingleAgentEnv`, draws opponents from the agent registry, and saves results through the simulation layer's store and policy artifacts.
+
+## PPO (`agents/learned/ppo/`)
+
+| File | Role |
+|---|---|
+| `model.py` | `ActorCritic`: tanh MLP trunk, policy head (488 logits), value head; orthogonal init |
+| `buffer.py` | `RolloutBuffer`: on-policy storage, GAE(λ), normalized advantages, minibatches |
+| `league.py` | `League`: opponent pool of fixed specs plus frozen snapshots of the learner |
+| `agent.py` | `PPOAgent`: playable wrapper, safetensors save/load, ONNX export |
+| `trainer.py` | `train(cfg)`: the loop below |
+
+### Loop
+1. Collect `rollout_steps` learner decisions in the single-agent env. Opponents are resampled from the league every episode: each seat is a past snapshot with probability `self_play_prob`, otherwise a fixed spec. Illegal actions are masked.
+2. On truncation, bootstrap with γ·V(s′) rather than treating the turn cap as a loss.
+3. GAE → clipped PPO update for `epochs` × minibatches, with entropy bonus, value loss and gradient clipping.
+4. Every `snapshot_every` steps, freeze a copy of the learner into the league (keeping the last `max_snapshots`).
+5. Every `eval_every` steps, play `eval_games` against `eval_opponents`, rotating the learner through all 4 seats.
+6. At the end: a final evaluation, then the policy is saved to `data/policies/<id>` and registered in the store with lineage (`parent_id` if warm-started via `init_policy`).
+
+Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate over the last 100 games, return, steps/sec, losses, entropy, approx KL, clip fraction, and the latest eval.
+
+### Config (`TrainConfig`, YAML)
+
+Full example: [`experiments/ppo_league.yaml`](../experiments/ppo_league.yaml). All fields and defaults are in `config/models.py`. Unknown keys are rejected, so typos fail immediately. The fields that matter most:
+
+| Field | Default | Why it matters |
+|---|---|---|
+| `init_policy` | null | Policy id/name to warm-start from (recorded as `parent_id`) |
+| `ppo.gamma` | 0.995 | Games are long (~60+ turns, hundreds of decisions) |
+| `ppo.vp_reward_scale` | 0.05 | Dense ΔVP shaping on top of the ±1 outcome |
+| `league.fixed_opponents` | `[random, greedy]` | Non-snapshot opponent pool |
+| `league.self_play_prob` | 0.5 | P(an opponent seat is a past snapshot) |
+| `league.snapshot_every` / `max_snapshots` | 20,000 / 5 | Snapshot cadence and pool size |
+| `eval_every` / `eval_games` / `eval_opponents` | 50,000 / 40 / 3× random | Periodic evaluation |
+
+## Results so far
+
+`experiments/ppo_small.yaml` (20k steps, about 30 s on CPU, random opponents): training win rate 0.33 → 0.46; final eval 40% over 20 games, where chance is 25%. That only shows the loop learns. A real result needs millions of steps against greedy.
+
+## Practical notes
+
+- **Throughput depends on the opponents.** About 1,000 learner steps/sec against random, much less against greedy or search agents. The next performance upgrade is vectorized environments: N games in parallel workers, batched forward passes.
+- **Curriculum:** start against `random`, move to `greedy` once the win rate is above ~60%, then raise `self_play_prob`. Warm-start each stage with `init_policy`.
+- **Credit assignment:** a game is hundreds of decisions with a reward only at the end; keep `gamma` high. `vp_reward_scale` helps early, but too much of it trains a VP-grabber that ignores blocking.
+- **Measure progress with tournaments,** not training win rate: `catan tournament` with a gauntlet of `policy:<id>` against greedy presets, and watch `catan ratings`.

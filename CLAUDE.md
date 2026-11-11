@@ -4,7 +4,7 @@ Catan RL platform: rules engine → player layer (observation + beliefs) → age
 
 ## Commands
 
-Always run through `uv run --no-editable` (or the Makefile). macOS keeps marking `.venv` files hidden, and Python skips hidden `.pth` files, so the editable install breaks with `No module named 'catan'`. Tests also work without the install (`pythonpath = ["src", "."]`).
+Always run through `uv run --no-editable` (or the Makefile); the editable install breaks on this Mac (hidden `.pth` files). Tests also work without the install (`pythonpath = ["src", "."]`).
 
 ```bash
 make test          # uv run --no-editable pytest   (~20 s; `-m "not slow"` to skip slow tests)

@@ -11,6 +11,8 @@ catan train experiments/v1_examples/ppo_small.yaml
 catan tournament experiments/v1_examples/baselines.yaml
 ```
 
+What we've learned across versions, and hypotheses for training better: [notes/findings.md](../notes/findings.md).
+
 Config fields and defaults are in `src/catan/config/models.py`. Unknown keys are rejected. See [docs/50-training.md](../docs/50-training.md) for the training loop.
 
 ## Chaining stages
@@ -148,4 +150,40 @@ for l in A_base B_nobonus C_vp D_explore; do
 done; wait
 ```
 
-Results: not run yet.
+As built, v5 compares *settings*: the learners differ in their own settings but all face the same environment. The intended experiment, identical learners compared across seeds, is v6.
+
+#### Stage 1 results (four learners in parallel, about 12 minutes)
+
+Evals against 3× random (40 games), as wins / turns per game:
+
+| Learner | 100k | 200k | 300k | 400k | 500k | Policy |
+|---|---|---|---|---|---|---|
+| A base | 52.5% / 222 | 90% / 183 | 95% / 138 | 100% / 113 | 97.5% / 115 | `0111f9d125` |
+| B no bonus | 42.5% / 249 | 87.5% / 166 | 97.5% / 140 | 95% / 124 | 97.5% / 123 | `60d4a7d393` |
+| C 2× VP | 42.5% / 241 | 97.5% / 170 | 100% / 119 | 97.5% / 137 | 100% / 114 | `836dbaee25` |
+| D 2× explore | 37.5% / 296 | 82.5% / 209 | 92.5% / 173 | 95% / 159 | 92.5% / 128 | `c3c961eee6` |
+
+The yardstick: the same 200-game comparison as for v3 and v4, with the same seeds and seat rotations.
+
+| Policy | + 2 random + greedy | + 3 greedy |
+|---|---|---|
+| A | 2.5%, **4.79 VP** | 0%, **3.55 VP** |
+| B | 3.5%, 4.75 VP | 0%, 3.37 VP |
+| C | 2.5%, 4.60 VP | 0%, 3.04 VP |
+| D | 2.0%, 4.06 VP | 0%, 3.16 VP |
+| *v4 PPO v2* | 1.5%, 4.30 VP | 0.5%, 3.01 VP |
+| *v3 stage 2* | 2.5%, 3.91 VP | 0.5%, 3.38 VP |
+
+Round-robin of the four plus v4's PPO v2 (400 games, every 4-of-5 lineup, seats rotated):
+
+| Policy | Win rate [95% interval] | VP |
+|---|---|---|
+| v4 PPO v2 | 56.6% [51–62%] | 8.2 |
+| C | 50.9% [45–56%] | 7.8 |
+| A | 7.8% | 4.6 |
+| D | 6.9% | 4.7 |
+| B | 2.8% | 4.1 |
+
+- **Training only against random gave the best yardstick scores yet** (A, B, C: 4.6–4.8 VP against greedy). Training against greedy hasn't helped so far.
+- **The speed bonus made no clear difference** against random or greedy (A vs B), though B finished last in the round-robin.
+- **C (2× reward per VP) is strong against other PPO policies,** almost matching PPO v2, which trained three times as long. That's one seed per setting, so v6 repeats C's settings with four seeds.

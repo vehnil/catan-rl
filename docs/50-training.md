@@ -39,6 +39,7 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `league.snapshot_every` / `max_snapshots` | 20,000 / 5 | Snapshot cadence and pool size |
 | `league.lineup` | false | true: `fixed_opponents` is the exact 3-seat lineup (shuffled per game) instead of a pool |
 | `eval_every` / `eval_games` / `eval_opponents` | 50,000 / 40 / 3× random | Periodic evaluation |
+| `checkpoint_every` | null | Save the policy every N steps as `<name>@<steps>-<run id>`, for `catan curve`. Checkpoints don't affect `init_policy: <config name>`, which still picks the final policy |
 
 ## Results so far
 

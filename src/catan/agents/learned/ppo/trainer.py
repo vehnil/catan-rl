@@ -55,15 +55,18 @@ def _eval_summary(results: list[tuple[int, bool, int, int]]) -> dict[str, float]
     }
 
 
-def _pin_policies(specs: list[str], data_dir: Path, log: Callable[[str], Any]) -> list[str]:
+def _pin_policies(
+    specs: list[str], data_dir: Path, log: Callable[[str], Any], logged: set[str]
+) -> list[str]:
     """Resolve each ``policy:<ref>`` to its id once, so every worker and game uses the same one."""
     out = []
     for spec in specs:
         if spec.startswith("policy:"):
             ref = spec.removeprefix("policy:")
             pid = read_manifest(resolve_policy_path(ref, data_dir))["id"]
-            if ref != pid:
+            if ref != pid and spec not in logged:
                 log(f"  {spec} -> policy:{pid}")
+                logged.add(spec)
             spec = f"policy:{pid}"
         out.append(spec)
     return out
@@ -122,10 +125,11 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
     model.eval()
     opt = torch.optim.Adam(model.parameters(), lr=p.lr, eps=1e-5)
 
+    logged: set[str] = set()
     league_cfg = cfg.league.model_copy(
-        update={"fixed_opponents": _pin_policies(cfg.league.fixed_opponents, data_dir, log)}
+        update={"fixed_opponents": _pin_policies(cfg.league.fixed_opponents, data_dir, log, logged)}
     )
-    eval_opponents = _pin_policies(cfg.eval_opponents, data_dir, log)
+    eval_opponents = _pin_policies(cfg.eval_opponents, data_dir, log, logged)
     env_kwargs: dict[str, Any] = {
         "vp_reward_scale": p.vp_reward_scale,
         "fast_win_bonus": p.fast_win_bonus,
@@ -153,6 +157,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
         )
 
     steps, episodes, t0 = 0, 0, time.perf_counter()
+    checkpointed = 0  # steps at the last checkpoint check
     recent_wins: deque[float] = deque(maxlen=100)
     recent_returns: deque[float] = deque(maxlen=100)
     recent_turns: deque[int] = deque(maxlen=100)
@@ -213,6 +218,19 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                     last_values = {0: model(torch.as_tensor(obs).unsqueeze(0))[1].item()}
             buf.compute_returns(last_values, p.gamma, p.gae_lambda)
             upd = _ppo_update(model, opt, buf, p, rng)
+            ce = cfg.checkpoint_every
+            if ce and steps // ce > checkpointed // ce:
+                ckpt, _ = save_policy(
+                    PPOAgent(p.hidden, model=model),
+                    data_dir,
+                    name=f"{cfg.name}@{steps}-{run_id}",
+                    run_id=run_id,
+                    parent_id=parent_id,
+                    metrics={"steps": steps, "episodes": episodes, "checkpoint": True},
+                    store=store,
+                )
+                log(f"  checkpoint @ {steps}: {ckpt['id']}")
+            checkpointed = steps
             row = {
                 "steps": steps,
                 "episodes": episodes,

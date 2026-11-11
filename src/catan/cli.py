@@ -246,6 +246,59 @@ def runs(limit: int = 20, data_dir: DataOpt = "data") -> None:
 
 
 @app.command()
+def curve(
+    run: Annotated[str, typer.Argument(help="Run id, or a training config name (newest run).")],
+    vs: Annotated[
+        list[str],
+        typer.Option("--vs", help="Lineup to play against, as name=spec,spec,spec. Repeatable."),
+    ],
+    games: int = 100,
+    seed: int = 0,
+    workers: int = 8,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Also write rows as JSON.")
+    ] = None,
+    data_dir: DataOpt = "data",
+) -> None:
+    """Evaluate a run's starting policy, checkpoints and final policy against fixed lineups."""
+    from catan.sim.artifacts import read_manifest, resolve_policy_path
+    from catan.sim.curve import evaluate_curve, run_checkpoints
+    from catan.sim.store import Store
+
+    lineups: dict[str, list[str]] = {}
+    for item in vs:
+        name, sep, specs = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--vs needs name=spec,spec,spec, got {item!r}")
+        pinned = []
+        for spec in (s.strip() for s in specs.split(",")):
+            if spec.startswith("policy:"):  # pin refs so the report names exact policies
+                pid = read_manifest(resolve_policy_path(spec.removeprefix("policy:"), data_dir))
+                spec = f"policy:{pid['id']}"
+            pinned.append(spec)
+        lineups[name.strip()] = pinned
+    with Store(Path(data_dir) / "catan.db") as store:
+        run_id, checkpoints = run_checkpoints(store, run)
+    typer.echo(
+        f"run {run_id}: {len(checkpoints)} policies x {len(lineups)} lineups x {games} games"
+    )
+    for name, lineup in lineups.items():
+        typer.echo(f"  {name}: {', '.join(lineup)}")
+    rows = evaluate_curve(checkpoints, lineups, games, seed, None, workers, data_dir)
+    table = []
+    for c in checkpoints:
+        row: dict[str, object] = {"policy": c.label, "id": c.policy_id}
+        for r in rows:
+            if r["label"] == c.label:
+                row[r["lineup"]] = f"{r['win_rate']:.0%} {r['mean_vp']:.2f}vp"
+        table.append(row)
+    typer.echo(_table(table, ["policy", "id", *lineups]))
+    if out is not None:
+        out.write_text(json.dumps({"run_id": run_id, "lineups": lineups, "rows": rows}, indent=2))
+        typer.echo(f"wrote {out}")
+
+
+@app.command()
 def benchmark(games: int = 50, agent: str = "random", workers: int = 1) -> None:
     """Measure engine + agent throughput (games/min)."""
     from catan.sim.runner import Matchup, run_matchups

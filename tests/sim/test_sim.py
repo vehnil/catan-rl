@@ -376,3 +376,41 @@ def test_ppo_stage_chain_against_frozen_previous_stage(tmp_path):
             for line in (tmp_path / "runs" / second["run_id"] / "metrics.jsonl").open()
         ]
     assert rows[-1]["turns_100"] is not None and "eval_mean_turns" in second
+
+
+@pytest.mark.slow
+def test_checkpoints_and_curve(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+    from catan.sim.curve import evaluate_curve, run_checkpoints
+
+    def run(name, init=None, checkpoint_every=None):
+        cfg = {
+            "name": name,
+            "data_dir": str(tmp_path),
+            "init_policy": init,
+            "checkpoint_every": checkpoint_every,
+            "rules": {"max_turns_per_game": 12},
+            "ppo": {
+                "total_steps": 192,
+                "rollout_steps": 64,
+                "minibatch": 32,
+                "epochs": 1,
+                "hidden": [32],
+            },
+            "league": {"fixed_opponents": ["random"], "self_play_prob": 0},
+            "eval_every": 10_000,
+            "eval_games": 2,
+        }
+        return train(TrainConfig.model_validate(cfg), log=lambda *_: None)
+
+    first = run("a")
+    second = run("b", init="a", checkpoint_every=64)
+    with Store(tmp_path / "catan.db") as store:
+        run_id, ckpts = run_checkpoints(store, "b")
+        assert store.policy("b")["id"] == second["policy_id"]  # checkpoints don't shadow the final
+    assert run_id == second["run_id"]
+    assert [c.label for c in ckpts] == ["pre", "64", "128", "final"]  # 192 == final, skipped
+    assert ckpts[0].policy_id == first["policy_id"] and ckpts[-1].policy_id == second["policy_id"]
+    lineups = {"rand": ["random"] * 3, "mixed": ["random", "random", "greedy"]}
+    rows = evaluate_curve(ckpts, lineups, games=4, workers=1, rules=QUICK, data_dir=tmp_path)
+    assert len(rows) == len(ckpts) * 2 and all(r["games"] == 4 for r in rows)

@@ -110,6 +110,8 @@ class TrainConfig(_Strict):
     eval_every: int = Field(50_000, ge=1)
     eval_games: int = Field(40, ge=1)
     eval_opponents: list[str] = ["random", "random", "random"]
+    # Save the policy every N steps as "<name>@<steps>-<run id>" (see `catan curve`).
+    checkpoint_every: int | None = Field(None, ge=1)
     data_dir: str = "data"
 
 

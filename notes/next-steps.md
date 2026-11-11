@@ -2,7 +2,17 @@
 
 Roughly in order. See [goals](goals.md) for the why.
 
-## Up next: behaviour cloning from greedy
+## Up next: ground-up ladders (no imitation)
+
+The project prefers learning from the ground up, so cloning waits (see below). The v3 ladder (3 random → 2 random + 1 greedy → …) stalled at stage 2: 0–2.5% wins and about 3.5 VP for all of its 1M steps. Greedy cashes in on the random players' mistakes and finishes around turn 60, long before the policy does. The policy loses every game, so the win/loss reward never tells it which moves were better.
+
+- [ ] **v4 PPO ladder** (`experiments/v4_ppo_ladder`): 3 random → 3× frozen PPO v1 → 2× PPO v1 + 1 greedy. Only the learner trains, and wins pay more the sooner they come (`fast_win_bonus`). Compare stage 3 with v3's stage 2 (2.5% wins, about 3.5 VP) before committing to a full ladder.
+- [ ] Variant, probably too ambitious but worth a look: 3 random → 3 PPO v1 → 2 PPO v2 + 1 greedy, where v2 is the stage-2 learner.
+- [ ] **v5 population:** train a few v4-style learners in parallel (different seeds or settings) so they learn different things. Then have them play each other (frozen peers, one learner at a time) before going to greedy.
+- [ ] Epsilon-greedy ladder: opponents `greedy:epsilon=0.8 → 0.5 → 0.2 → 0`, so difficulty rises in steps instead of jumping from random to greedy.
+- [ ] Reward that still teaches when losing, e.g. finishing rank or VP margin over the leader instead of only win/loss.
+
+## Later: behaviour cloning from greedy
 
 The first PPO round (500k steps vs random, then 1M vs greedy) beat random but never beat greedy. It learned to exploit greedy's trade acceptance (greedy only checks its own gain) and almost never built cities. Cloning gives it greedy's play as a starting point, and a direct training signal for the opening, which the end-of-game reward barely reaches (γ = 0.995 over ~200–380 decisions per game).
 

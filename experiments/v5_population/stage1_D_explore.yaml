@@ -1,0 +1,24 @@
+# Stage 1 of 2: four learners train in parallel against three random players.
+# Learner D: double the exploration bonus. Only the learner trains. See ../README.md.
+name: v5_stage1_D_explore
+seed: 13
+ppo:
+  total_steps: 500000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  entropy_coef: 0.02
+  fast_win_bonus: 0.5
+  fast_win_turns: 200
+  num_envs: 2
+league:
+  fixed_opponents: [random, random, random]
+  lineup: true
+  self_play_prob: 0.0
+  snapshot_every: 10000000  # unused without self-play
+eval_every: 100000
+eval_games: 40
+eval_opponents: [random, random, random]

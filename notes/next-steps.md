@@ -6,9 +6,9 @@ Roughly in order. See [goals](goals.md) for the why.
 
 The project prefers learning from the ground up, so cloning waits (see below). The v3 ladder (3 random → 2 random + 1 greedy → …) stalled at stage 2: 0–2.5% wins and about 3.5 VP for all of its 1M steps. Greedy cashes in on the random players' mistakes and finishes around turn 60, long before the policy does. The policy loses every game, so the win/loss reward never tells it which moves were better.
 
-- [ ] **v4 PPO ladder** (`experiments/v4_ppo_ladder`): 3 random → 3× frozen PPO v1 → 2× PPO v1 + 1 greedy. Only the learner trains, and wins pay more the sooner they come (`fast_win_bonus`). Compare stage 3 with v3's stage 2 (2.5% wins, about 3.5 VP) before committing to a full ladder.
+- [x] **v4 PPO ladder** (`experiments/v4_ppo_ladder`): 3 random → 3× frozen PPO v1 → 2× PPO v1 + 1 greedy, with the speed bonus. No gain against greedy. Self-play made it faster (about 95 turns vs 120 against v1) but greedy finishes around 65, and the greedy stage made it worse, as in v3. Best against greedy: PPO v2 (`9413f93f8b`, never trained on greedy), 4.3 VP vs 3.9 for v3. Details in `experiments/README.md`.
 - [ ] Variant, probably too ambitious but worth a look: 3 random → 3 PPO v1 → 2 PPO v2 + 1 greedy, where v2 is the stage-2 learner.
-- [ ] **v5 population:** train a few v4-style learners in parallel (different seeds or settings) so they learn different things. Then have them play each other (frozen peers, one learner at a time) before going to greedy.
+- [ ] **v5 population** (`experiments/v5_population`): four learners with different settings train in parallel against random, then each trains against the other three (frozen). Greedy is only a yardstick, not a training opponent. Run one stage at a time and discuss before the next.
 - [ ] Epsilon-greedy ladder: opponents `greedy:epsilon=0.8 → 0.5 → 0.2 → 0`, so difficulty rises in steps instead of jumping from random to greedy.
 - [ ] Reward that still teaches when losing, e.g. finishing rank or VP margin over the leader instead of only win/loss.
 
@@ -33,8 +33,8 @@ The first PPO round (500k steps vs random, then 1M vs greedy) beat random but ne
 ## What already exists
 
 - **Belief tracker** (`player/belief.py`): forward filter and Viterbi over opponents' hands. It rules out impossible hands on builds, offers, accepts, discards and monopoly payouts. It also gives `determinize()` for search.
-- **PPO** (`agents/learned/ppo/`): actor-critic with a scalar value head. Reward is +1 for the winner and −1 for everyone else at the end of the game, plus 0.05 per VP gained (`vp_reward_scale`). Two trained policies from the first round: `8a19bcdc50` (vs random) and `9a4a93bf0a` (vs greedy); neither beats greedy.
-- **Greedy trading:** proposes at most one offer per turn, giving at least as many cards as it asks for, picked by its own evaluation gain. It accepts any offer that raises its own evaluation by more than 2, without looking at the proposer's gain, which PPO learned to exploit. Search agents never consider trade proposals.
+- **PPO** (`agents/learned/ppo/`): actor-critic with a scalar value head. Reward is +1 for the winner and −1 for everyone else at the end of the game, plus 0.05 per VP gained (`vp_reward_scale`) and an optional speed bonus for wins (`fast_win_bonus`). Training runs in parallel workers (`num_envs`), and opponents can be fixed lineups including frozen stored policies. None of the trained policies beats greedy yet; see `experiments/README.md` for every run.
+- **Greedy trading:** proposes at most one offer per turn, never asking for more cards than it gives, picked by its own evaluation gain. It accepts only if its evaluation rises by more than 2, the offer doesn't ask for more cards than it gives, and the proposer's estimated gain isn't bigger than its own. The older self-only rule, which PPO exploited, is `max_partner_edge=inf`. Search agents never consider trade proposals.
 - **Replays** store only `seed + actions`; `catan view` replays them in the browser, with seat views and beliefs.
 
 ## 1. Measurement
@@ -61,7 +61,7 @@ The first PPO round (500k steps vs random, then 1M vs greedy) beat random but ne
 
 - [ ] Value head → 4-way win probability (softmax over seats), trained on game outcomes. A move's value = change in my win probability.
 - [ ] Dataset builder: re-run replays to recover each decision's (features, mask, action, outcome).
-- [ ] Behavior cloning from greedy (see the top of this file), later from ISMCTS games.
+- [ ] Behavior cloning from greedy (see "Later" above), later from ISMCTS games.
 - [ ] Expert iteration: ISMCTS guided by the network's policy and value, with the network trained on the search results; repeat.
 
 ## 5. Trading agents
@@ -72,5 +72,5 @@ The first PPO round (500k steps vs random, then 1M vs greedy) beat random but ne
 
 ## 6. Performance (when training gets slow)
 
-- [ ] Fix device handling in `trainer.py` (lines 133 and 154 ignore `device`), then run rollouts on CPU and updates on MPS.
+- [ ] Fix device handling in `trainer.py`: the single-process loop's truncation bootstrap and last-value calls ignore `device`. MPS isn't worth it for now, though: measured on the M1, an update takes 0.48 s on MPS vs 0.31 s on CPU, and single-position inference is 11× slower.
 - [x] Rollout workers and a faster greedy: done (see the top of this file).

@@ -119,3 +119,33 @@ There was no gain against greedy:
 - Self-play made the policy faster than v1 (about 95 turns vs 120), but greedy ends these games around turn 65.
 - Training against greedy (stage 3) made it worse, as in v3. It almost never wins, entropy drifts up (0.86 → 1.3), and play degrades.
 - The best policy against greedy is PPO v2, which never played greedy.
+
+### v5_population: four learners, then each against the others
+
+Several learners with different settings, so they learn different things, then each one trains against the others. Greedy is only a yardstick, never a training opponent.
+
+| Learner | What's different (otherwise v4's settings) | Seed (stage 1 / 2) |
+|---|---|---|
+| A `A_base` | nothing: speed bonus 0.5, 0.05 per VP, entropy 0.01 | 10 / 20 |
+| B `B_nobonus` | no speed bonus (plain win/loss reward; also tests whether the bonus helped in v4) | 11 / 21 |
+| C `C_vp` | double the reward per VP (`vp_reward_scale: 0.1`) | 12 / 22 |
+| D `D_explore` | double the exploration bonus (`entropy_coef: 0.02`) | 13 / 23 |
+
+| Stage | Opponents | Steps per learner | Warm start |
+|---|---|---|---|
+| `stage1_<learner>` | random × 3 | 500k | from scratch |
+| `stage2_<learner>` | the other three learners' stage-1 policies (frozen) | 1M | own stage 1 |
+
+- **Parallel.** The four learners of a stage run at the same time, with 2 workers each, using all 8 cores.
+- **One stage at a time,** with a review of the results before the next. A third round against the peers' stage-2 policies is possible if stage 2 looks promising.
+- **After each stage, every policy gets the same yardstick:** 200 games against 2 random + greedy and 200 against 3× greedy (same seeds and seat rotations as the v4 comparison), plus a round-robin of the population.
+
+Run a stage:
+
+```bash
+for l in A_base B_nobonus C_vp D_explore; do
+  catan train experiments/v5_population/stage1_$l.yaml > data/v5_stage1_$l.log 2>&1 &
+done; wait
+```
+
+Results: not run yet.

@@ -58,4 +58,4 @@ dev = [
 # files, which silently breaks the editable install. `uv run --no-editable` (or
 # UV_NO_EDITABLE=1) installs a regular copy instead; these keys make uv rebuild that
 # copy whenever a source file changes.
-cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }, { file = "src/catan/viewer/static/**" }]

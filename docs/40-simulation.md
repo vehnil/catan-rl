@@ -62,6 +62,22 @@ A replay is a gzipped `GameRecord` JSON in `data/replays/<run_id>/`. Since the e
 - `step_through(rec, seat)`: yields (step, actor, action description, rendered board), optionally from one seat's point of view
 - `verify(rec)`: re-simulates and checks the recorded outcome
 
+## Timeline and viewer (`timeline.py`, `catan/viewer/`)
+
+`build_timeline(rec)` re-simulates a replay into plain JSON (about 1 MB for a 300-step game):
+
+- `meta`: seed, agents, result, `verified`, plus name tables (resources, dev cards, trade offers).
+- `board`: hex centers, corner positions and edges in unit-hex coordinates (pointy top, circumradius 1), plus ports.
+- `steps[i]`: the action that led to position i (`None` for i = 0), its events, a state snapshot, and every seat's belief tracker summary. Each event holds the spectator view; events with secrets add `views[seat]` for the seats that don't see them.
+
+`catan view [replay]` starts a stdlib HTTP server on 127.0.0.1 and opens the viewer page (one HTML file, no build step). With no replay given, it opens a picker listing every match in the store that has a replay file. The page has:
+
+- an SVG board with pieces and the robber, with this step's changes highlighted;
+- step and turn navigation, play/pause, and keyboard shortcuts (← → step, Shift+← → turn, Space play/pause);
+- a "view as" seat selector. In seat view, opponents' hands become the tracker's guesses (expected count, MAP, Viterbi, number of hypotheses), and "show truth" puts the real hand underneath with mismatches in red.
+
+The URL keeps the replay, step and seat, so a position can be linked to.
+
 ## Policies (`artifacts.py`)
 
 ```
@@ -90,6 +106,8 @@ Run with `uv run --no-editable catan …`.
 | `catan tournament experiments/x.yaml` | Tournament from a config |
 | `catan train experiments/ppo_small.yaml` | PPO training |
 | `catan replay <file> [--step] [--seat N]` | Re-simulate, render, verify |
+| `catan view [file] [--port] [--no-open]` | Browser viewer for stored games |
+| `catan timeline <file> [-o out.json]` | Export a replay as per-step JSON |
 | `catan export <policy> -f json\|onnx` | Export a policy |
 | `catan ratings` · `catan policies` · `catan runs` | Inspect the store |
 | `catan benchmark --games 200 --workers 8` | Throughput |

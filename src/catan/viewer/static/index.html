@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catan Viewer</title>
+<style>
+:root {
+  --bg: #f4f1ea; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #ddd8cc;
+  --accent: #c8901a; --bad: #c4372f; --good: #2e8540; --sea: #4a87b8; --hl: #ffd23f;
+  --p0: #d64545; --p1: #2f6fd0; --p2: #e08a1e; --p3: #7a4bc2;
+  --wood: #3f7d3a; --brick: #b5563a; --sheep: #93c25b; --wheat: #e5c04a; --ore: #8a8f99; --desert: #d9c79a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16181c; --panel: #202329; --ink: #e6e6e6; --muted: #9aa0a8; --line: #343840; --sea: #2c5a80;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #16181c; --panel: #202329; --ink: #e6e6e6; --muted: #9aa0a8; --line: #343840; --sea: #2c5a80;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 16px; margin: 0; }
+header .meta { color: var(--muted); flex: 1; min-width: 200px; }
+button, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr); gap: 12px; padding: 12px 16px; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+#boardWrap { padding: 4px; }
+svg#board { width: 100%; height: auto; display: block; }
+.status { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 8px; }
+.status b { font-weight: 600; }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.controls input[type=range] { flex: 1; min-width: 160px; }
+#stepLabel { font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; color: var(--muted); }
+#action { margin-top: 6px; min-height: 1.4em; }
+.players { display: grid; gap: 10px; align-content: start; }
+.player { border-left: 5px solid var(--c); }
+.player .top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.player .name { font-weight: 600; }
+.player .vp { margin-left: auto; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.player .vp small { font-size: 12px; color: var(--muted); font-weight: 400; }
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line); }
+.badge.turn { background: var(--accent); color: #fff; border-color: var(--accent); }
+.badge.act { border-color: var(--accent); color: var(--accent); }
+.badge.win { background: var(--good); color: #fff; border-color: var(--good); }
+.res { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px 1px 3px; border-radius: 5px;
+  background: var(--bg); font-variant-numeric: tabular-nums; }
+.chip i { width: 12px; height: 12px; border-radius: 3px; background: var(--r); display: inline-block; }
+.chip.zero { opacity: .35; }
+.sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+table.belief { border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; font-size: 12px; }
+table.belief th, table.belief td { padding: 1px 6px; text-align: right; }
+table.belief th:first-child, table.belief td:first-child { text-align: left; color: var(--muted); }
+table.belief td.bar { position: relative; min-width: 38px; }
+table.belief td.bar span { position: absolute; left: 2px; bottom: 2px; height: 3px; background: var(--r); border-radius: 2px; }
+table.belief td.miss { color: var(--bad); font-weight: 700; }
+table.belief tr.truth td { border-top: 1px dashed var(--line); }
+#log { max-height: 340px; overflow-y: auto; margin-top: 12px; font-size: 13px; }
+#log div { padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex; gap: 8px; }
+#log div:hover { background: var(--bg); }
+#log div.cur { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+#log div.future { opacity: .4; }
+#log .n { color: var(--muted); min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+#log .who { font-weight: 600; min-width: 24px; }
+#log .ev { color: var(--muted); }
+#picker { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: flex-start;
+  justify-content: center; padding: 40px 16px; z-index: 10; }
+#picker.open { display: flex; }
+#picker .card { width: min(900px, 100%); max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+#picker input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); width: 100%; margin: 8px 0; }
+#picker .list { overflow-y: auto; }
+#picker table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#picker td, #picker th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+#picker tbody tr { cursor: pointer; }
+#picker tbody tr:hover { background: var(--bg); }
+.err { color: var(--bad); }
+svg text { font-family: inherit; pointer-events: none; }
+.hl { fill: none; stroke: var(--hl); stroke-width: 7; opacity: .9; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Catan Viewer</h1>
+  <span class="meta" id="meta">no game loaded</span>
+  <label>View as <select id="pov"><option value="-1">Spectator</option></select></label>
+  <label><input type="checkbox" id="truth"> show truth</label>
+  <button id="openPicker">Games…</button>
+</header>
+<main>
+  <section class="card" id="boardWrap">
+    <div class="status" id="status"></div>
+    <svg id="board" viewBox="-560 -520 1120 1040" role="img" aria-label="Catan board"></svg>
+    <div class="controls">
+      <button id="first" title="First step (Home)">⏮</button>
+      <button id="prevTurn" title="Previous turn (Shift+←)">« turn</button>
+      <button id="prev" title="Previous step (←)">◀</button>
+      <button id="play" title="Play / pause (Space)">▶</button>
+      <button id="next" title="Next step (→)">▶|</button>
+      <button id="nextTurn" title="Next turn (Shift+→)">turn »</button>
+      <button id="last" title="Last step (End)">⏭</button>
+      <select id="speed" title="Steps per second">
+        <option value="2">2/s</option><option value="5" selected>5/s</option>
+        <option value="10">10/s</option><option value="25">25/s</option><option value="60">60/s</option>
+      </select>
+      <input type="range" id="slider" min="0" max="0" value="0">
+      <span id="stepLabel">0 / 0</span>
+    </div>
+    <div id="action"></div>
+    <div id="log"></div>
+  </section>
+  <section class="players" id="players"></section>
+</main>
+<div id="picker"><div class="card">
+  <div style="display:flex;align-items:center;gap:8px"><b style="flex:1">Stored games</b><button id="closePicker">Close</button></div>
+  <input id="filter" placeholder="Filter by run, agent, seed…">
+  <div class="list"><table><thead><tr><th>Run</th><th>Seed</th><th>Agents (seat 0–3)</th><th>Winner</th><th>Turns</th></tr></thead>
+  <tbody id="pickerRows"></tbody></table></div>
+</div></div>
+<script>
+"use strict";
+const S = 100;  // px per unit of hex radius
+const RES = ["wood", "brick", "sheep", "wheat", "ore"];
+const RES_SHORT = ["Wd", "Br", "Sh", "Wh", "Or"];
+const DEV_SHORT = ["Kn", "VP", "RB", "YoP", "Mono"];
+const NS = "http://www.w3.org/2000/svg";
+const $ = (id) => document.getElementById(id);
+const pc = (p) => `var(--p${p})`;
+const rc = (r) => `var(--${RES[r]})`;
+
+let TL = null, step = 0, pov = -1, timer = null, replayPath = null;
+
+function el(tag, attrs = {}, parent = null, text = null) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
+function cards(v) { return v.map((n, r) => n ? `${n} ${RES[r]}` : null).filter(Boolean).join(" + ") || "nothing"; }
+
+// ---------------------------------------------------------------- board
+let staticLayer, pieceLayer;
+function drawStatic() {
+  const svg = $("board");
+  svg.innerHTML = "";
+  el("rect", { x: -560, y: -520, width: 1120, height: 1040, rx: 24, fill: "var(--sea)" }, svg);
+  staticLayer = el("g", {}, svg);
+  pieceLayer = el("g", {}, svg);
+  const B = TL.board, V = B.vertices;
+  B.ports.forEach((port) => {
+    const [a, b] = B.edges[port.edge];
+    const mx = (V[a].x + V[b].x) / 2, my = (V[a].y + V[b].y) / 2, d = Math.hypot(mx, my);
+    const px = (mx + mx / d * 0.55) * S, py = (my + my / d * 0.55) * S;
+    for (const v of [a, b]) el("line", { x1: V[v].x * S, y1: V[v].y * S, x2: px, y2: py, stroke: "#e9dcc0", "stroke-width": 6 }, staticLayer);
+    const generic = port.type === "3:1";
+    el("circle", { cx: px, cy: py, r: 24, fill: generic ? "#f5ecd6" : `var(--${port.type})`, stroke: "#5a4a2a", "stroke-width": 2 }, staticLayer);
+    el("text", { x: px, y: py + 5, "text-anchor": "middle", "font-size": 15, "font-weight": 700, fill: generic ? "#333" : "#fff" }, staticLayer, generic ? "3:1" : "2:1");
+  });
+  B.hexes.forEach((h, i) => {
+    const pts = h.vertices.map((v) => `${V[v].x * S},${V[v].y * S}`).join(" ");
+    const poly = el("polygon", { points: pts, fill: `var(--${h.terrain})`, stroke: "#f2e6c8", "stroke-width": 4 }, staticLayer);
+    el("title", {}, poly, `hex ${i}: ${h.terrain}${h.number ? " " + h.number : ""}`);
+    if (h.number) {
+      const cx = h.x * S, cy = h.y * S, red = h.number === 6 || h.number === 8;
+      el("circle", { cx, cy, r: 30, fill: "#f7efdc", stroke: "#5a4a2a", "stroke-width": 1.5 }, staticLayer);
+      el("text", { x: cx, y: cy + 7, "text-anchor": "middle", "font-size": 24, "font-weight": 700, fill: red ? "#c4372f" : "#222" }, staticLayer, h.number);
+      const pips = 6 - Math.abs(h.number - 7);
+      for (let k = 0; k < pips; k++) el("circle", { cx: cx + (k - (pips - 1) / 2) * 7, cy: cy + 18, r: 2.4, fill: red ? "#c4372f" : "#222" }, staticLayer);
+    }
+  });
+}
+
+function house(x, y, p, city, parent) {
+  const d = city
+    ? `M${x - 22},${y + 15} v-20 l11,-11 l11,11 h22 v20 z`
+    : `M${x - 13},${y + 12} v-15 l13,-12 l13,12 v15 z`;
+  el("path", { d, fill: pc(p), stroke: "#1a1a1a", "stroke-width": 2.5, "stroke-linejoin": "round" }, parent);
+}
+
+function drawPieces() {
+  const st = TL.steps[step].state, prev = step > 0 ? TL.steps[step - 1].state : null;
+  const B = TL.board, V = B.vertices;
+  pieceLayer.innerHTML = "";
+  st.edge_owner.forEach((o, e) => {
+    if (o < 0) return;
+    const [a, b] = B.edges[e], t = 0.16;
+    const x1 = V[a].x + (V[b].x - V[a].x) * t, y1 = V[a].y + (V[b].y - V[a].y) * t;
+    const x2 = V[b].x + (V[a].x - V[b].x) * t, y2 = V[b].y + (V[a].y - V[b].y) * t;
+    const seg = { x1: x1 * S, y1: y1 * S, x2: x2 * S, y2: y2 * S, "stroke-linecap": "round" };
+    if (prev && prev.edge_owner[e] !== o) el("line", { ...seg, class: "hl", "stroke-width": 22 }, pieceLayer);
+    el("line", { ...seg, stroke: "#1a1a1a", "stroke-width": 15 }, pieceLayer);
+    el("line", { ...seg, stroke: pc(o), "stroke-width": 10 }, pieceLayer);
+  });
+  // robber: drawn on its hex, beside the number token
+  const rh = B.hexes[st.robber], rx = rh.x * S + 46, ry = rh.y * S + 6;
+  if (prev && prev.robber !== st.robber) el("circle", { cx: rx, cy: ry - 6, r: 30, class: "hl" }, pieceLayer);
+  el("ellipse", { cx: rx, cy: ry + 6, rx: 13, ry: 17, fill: "#2b2b2b", stroke: "#eee", "stroke-width": 2 }, pieceLayer);
+  el("circle", { cx: rx, cy: ry - 16, r: 9, fill: "#2b2b2b", stroke: "#eee", "stroke-width": 2 }, pieceLayer);
+  st.vertex_owner.forEach((o, v) => {
+    if (o < 0) return;
+    const x = V[v].x * S, y = V[v].y * S;
+    if (prev && (prev.vertex_owner[v] !== o || prev.vertex_level[v] !== st.vertex_level[v]))
+      el("circle", { cx: x, cy: y, r: 30, class: "hl" }, pieceLayer);
+    house(x, y, o, st.vertex_level[v] === 2, pieceLayer);
+  });
+}
+
+// ---------------------------------------------------------------- events
+function eventView(e) { return pov >= 0 && e.views && e.views[pov] ? e.views[pov] : e; }
+function fmtEvent(e) {
+  e = eventView(e);
+  const P = (p) => `P${p}`;
+  switch (e.kind) {
+    case "roll": return `rolled ${e.dice[0]}+${e.dice[1]} = ${e.sum}`;
+    case "produce": return e.gains.map((g, p) => g.some((n) => n) ? `${P(p)} +${cards(g)}` : null).filter(Boolean).join("; ") || "no production";
+    case "setup_resources": return `${P(e.player)} got ${cards(e.resources)}`;
+    case "discard": return `${P(e.player)} discarded ${RES[e.resource]}`;
+    case "move_robber": return `robber → hex ${e.hex}`;
+    case "steal": return `${P(e.player)} stole ${e.resource != null ? RES[e.resource] : "a card"} from ${P(e.victim)}`;
+    case "build_settlement": return `${P(e.player)} built a settlement at v${e.vertex}`;
+    case "build_city": return `${P(e.player)} built a city at v${e.vertex}`;
+    case "build_road": return `${P(e.player)} built a road at e${e.edge}`;
+    case "buy_dev": return `${P(e.player)} bought a dev card${e.card != null ? ` (${TL.meta.dev_cards[e.card]})` : ""}`;
+    case "play_dev": return `${P(e.player)} played ${TL.meta.dev_cards[e.card]}`;
+    case "year_of_plenty": return `${P(e.player)} took ${e.resources.map((r) => RES[r]).join(" + ")}`;
+    case "monopoly": return `${P(e.player)} monopolized ${RES[e.resource]}: ` + Object.entries(e.taken).map(([q, n]) => `${n} from ${P(q)}`).join(", ");
+    case "maritime_trade": return `${P(e.player)} traded ${e.count} ${RES[e.give]} → 1 ${RES[e.get]}`;
+    case "propose_trade": { const [g, r] = TL.meta.offers[e.offer]; return `${P(e.player)} offers ${cards(g)} for ${cards(r)}`; }
+    case "respond_trade": return `${P(e.player)} ${e.accept ? "accepts" : "rejects"}${e.auto ? " (can't afford)" : ""}`;
+    case "trade": { const [g, r] = TL.meta.offers[e.offer]; return `${P(e.player)} gave ${P(e.partner)} ${cards(g)} for ${cards(r)}`; }
+    case "cancel_trade": return `${P(e.player)} cancelled the trade`;
+    case "end_turn": return `${P(e.player)} ended turn`;
+    case "longest_road": return e.player >= 0 ? `${P(e.player)} takes Longest Road` : "Longest Road unclaimed";
+    case "largest_army": return `${P(e.player)} takes Largest Army`;
+    case "game_over": return e.truncated ? "game over (turn limit)" : `game over: ${P(e.winner)} wins`;
+    default: return e.kind;
+  }
+}
+
+function buildLog() {
+  const log = $("log");
+  log.innerHTML = TL.steps.map((s, i) => {
+    if (!s.action) return `<div data-i="0"><span class="n">#0</span><span class="who"></span><span>start</span></div>`;
+    const evs = s.events.map(fmtEvent).filter((t) => !/ ended turn$/.test(t)).join(" · ");
+    return `<div data-i="${i}"><span class="n">#${i}</span><span class="who" style="color:${pc(s.action.actor)}">P${s.action.actor}</span>`
+      + `<span>${esc(s.action.label)}${evs ? ` <span class="ev">— ${esc(evs)}</span>` : ""}</span></div>`;
+  }).join("");
+}
+function updateLog() {
+  const log = $("log");
+  for (const d of log.children) {
+    const i = +d.dataset.i;
+    d.classList.toggle("cur", i === step);
+    d.classList.toggle("future", i > step);
+  }
+  const cur = log.children[step];
+  if (cur) {
+    const top = cur.offsetTop - log.offsetTop;
+    if (top < log.scrollTop || top > log.scrollTop + log.clientHeight - 30) log.scrollTop = top - log.clientHeight / 2;
+  }
+}
+
+// ---------------------------------------------------------------- panels
+function chips(v, opts = {}) {
+  return `<div class="res">${v.map((n, r) => `<span class="chip${n ? "" : " zero"}" style="--r:${rc(r)}" title="${RES[r]}"><i></i>${opts.fmt ? opts.fmt(n) : n}</span>`).join("")}</div>`;
+}
+function beliefTable(b, truth) {
+  const showTruth = $("truth").checked;
+  const max = Math.max(1, ...b.expected, ...(showTruth ? truth : []));
+  const head = `<tr><th></th>${RES_SHORT.map((s, r) => `<th style="color:${rc(r)}">${s}</th>`).join("")}</tr>`;
+  const exp = `<tr><td>E[·]</td>${b.expected.map((x, r) => `<td class="bar" style="--r:${rc(r)}">${x.toFixed(2)}<span style="width:${Math.round(34 * x / max)}px"></span></td>`).join("")}</tr>`;
+  const row = (name, v, cls = "") => `<tr class="${cls}"><td>${name}</td>${v.map((n, r) => `<td class="${showTruth && truth[r] !== n && cls !== "truth" ? "miss" : ""}">${n}</td>`).join("")}</tr>`;
+  return `<table class="belief">${head}${exp}${row("MAP", b.map)}${row("Viterbi", b.viterbi)}${showTruth ? row("truth", truth, "truth") : ""}</table>`;
+}
+function drawPlayers() {
+  const s = TL.steps[step], st = s.state;
+  const B = pov >= 0 ? s.beliefs[pov] : null;
+  $("players").innerHTML = st.players.map((pl, p) => {
+    const hidden = pov >= 0 && p !== pov;
+    const badges = [];
+    if (st.current === p && !st.done) badges.push(`<span class="badge turn">turn</span>`);
+    if (st.actor === p && st.actor !== st.current && !st.done) badges.push(`<span class="badge act">acting</span>`);
+    if (st.winner === p) badges.push(`<span class="badge win">winner</span>`);
+    if (pl.longest_road) badges.push(`<span class="badge">Longest Road</span>`);
+    if (pl.largest_army) badges.push(`<span class="badge">Largest Army</span>`);
+    if (p === pov) badges.push(`<span class="badge">you</span>`);
+    const vp = hidden || pl.total_vp === pl.public_vp ? (hidden ? pl.public_vp : pl.total_vp)
+      : `${pl.total_vp} <small>(${pl.public_vp} public)</small>`;
+    const nCards = pl.hand.reduce((a, b) => a + b, 0), nDev = pl.devs.reduce((a, b) => a + b, 0);
+    let body;
+    if (hidden) {
+      const b = B.hands[p];
+      const pvp = B.dev_type_probs[1];
+      body = `<div class="sub">${nCards} cards · ${b.hypotheses} hypothes${b.hypotheses === 1 ? "is" : "es"}`
+        + ` · ${b.dev_cards} dev card${b.dev_cards === 1 ? "" : "s"}${b.dev_cards ? ` (P(VP) ${pvp.toFixed(2)} each)` : ""}`
+        + `${$("truth").checked && nDev ? ` · truth: ${devList(pl.devs)}` : ""}</div>${beliefTable(b, pl.hand)}`;
+    } else {
+      body = `${chips(pl.hand)}<div class="sub">${nCards} cards · dev: ${nDev ? devList(pl.devs) : "none"}</div>`;
+    }
+    const left = pl.pieces_left;
+    return `<div class="card player" style="--c:${pc(p)}"><div class="top"><span class="name" style="color:${pc(p)}">P${p}</span>`
+      + `<span class="sub" style="margin:0">${esc(TL.meta.agents[p] ?? "")}</span>${badges.join("")}<span class="vp">${vp} <small>VP</small></span></div>`
+      + body
+      + `<div class="sub">knights ${pl.knights} · road ${pl.road_length} · left: ${left.settlements} sett, ${left.cities} city, ${left.roads} road</div></div>`;
+  }).join("");
+}
+function devList(v) { return v.map((n, c) => n ? `${n} ${DEV_SHORT[c]}` : null).filter(Boolean).join(", "); }
+
+function drawStatus() {
+  const s = TL.steps[step], st = s.state;
+  const parts = [
+    `<span>Turn <b>${st.turn}</b></span>`,
+    `<span>Phase <b>${st.phase.replace(/_/g, " ").toLowerCase()}</b></span>`,
+    `<span>Dice <b>${st.last_roll || "–"}</b></span>`,
+    `<span>Current <b style="color:${pc(st.current)}">P${st.current}</b></span>`,
+    `<span>Dev deck <b>${st.dev_deck}</b></span>`,
+    `<span>Bank ${chips(st.bank).replace('class="res"', 'class="res" style="display:inline-flex;margin:0"')}</span>`,
+  ];
+  if (st.trade) {
+    const t = st.trade;
+    parts.push(`<span>Trade: <b style="color:${pc(t.proposer)}">P${t.proposer}</b> gives ${cards(t.give)} for ${cards(t.get)}`
+      + `${t.pending.length ? ` · waiting on ${t.pending.map((q) => "P" + q).join(", ")}` : ""}`
+      + `${t.acceptors.length ? ` · accepted by ${t.acceptors.map((q) => "P" + q).join(", ")}` : ""}</span>`);
+  }
+  $("status").innerHTML = parts.join("");
+  $("action").innerHTML = s.action
+    ? `<b style="color:${pc(s.action.actor)}">P${s.action.actor}</b> ${esc(s.action.label)}`
+      + (s.events.length ? ` <span class="sub">— ${esc(s.events.map(fmtEvent).join(" · "))}</span>` : "")
+    : `<span class="sub">Start of game: board set up, nothing placed yet.</span>`;
+}
+
+// ---------------------------------------------------------------- navigation
+function render() {
+  if (!TL) return;
+  $("slider").value = step;
+  $("stepLabel").textContent = `${step} / ${TL.steps.length - 1}`;
+  drawPieces(); drawStatus(); drawPlayers(); updateLog();
+  history.replaceState(null, "", `${location.pathname}${location.search}#step=${step}&pov=${pov}`);
+}
+function go(i) { step = Math.max(0, Math.min(TL.steps.length - 1, i)); render(); }
+function turnJump(dir) {
+  const turnOf = (i) => TL.steps[i].state.turn, t = turnOf(step);
+  let i = step;
+  if (dir > 0) { while (i < TL.steps.length - 1 && turnOf(i) === t) i++; }
+  else {
+    while (i > 0 && turnOf(i - 1) === t) i--;           // start of this turn
+    if (i === step && i > 0) { const t2 = turnOf(i - 1); i--; while (i > 0 && turnOf(i - 1) === t2) i--; }
+  }
+  go(i);
+}
+function setPlaying(on) {
+  clearInterval(timer); timer = null;
+  $("play").textContent = on ? "⏸" : "▶";
+  if (on) timer = setInterval(() => { if (step >= TL.steps.length - 1) setPlaying(false); else go(step + 1); }, 1000 / +$("speed").value);
+}
+
+async function loadReplay(path) {
+  setPlaying(false);
+  $("meta").textContent = `loading ${path}…`;
+  const r = await fetch(`/api/timeline?path=${encodeURIComponent(path)}`);
+  if (!r.ok) { $("meta").innerHTML = `<span class="err">${esc((await r.json()).error)}</span>`; return; }
+  TL = await r.json();
+  replayPath = path;
+  const m = TL.meta;
+  $("meta").textContent = `${path} · seed ${m.seed} · ${m.turns} turns · `
+    + (m.winner >= 0 ? `winner P${m.winner} (${m.agents[m.winner]})` : "no winner (truncated)")
+    + (m.verified ? "" : " · ⚠ replay does not reproduce its recorded result");
+  $("slider").max = TL.steps.length - 1;
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const sameGame = new URLSearchParams(location.search).get("replay") === path;
+  if (!sameGame) history.replaceState(null, "", `?replay=${encodeURIComponent(path)}`);
+  step = sameGame ? Math.min(+hash.get("step") || 0, TL.steps.length - 1) : 0;
+  pov = sameGame && hash.has("pov") ? +hash.get("pov") : pov;
+  $("pov").value = pov;
+  drawStatic(); buildLog(); render();
+}
+
+// ---------------------------------------------------------------- picker
+let REPLAYS = [];
+async function openPicker() {
+  $("picker").classList.add("open");
+  if (!REPLAYS.length) {
+    $("pickerRows").innerHTML = `<tr><td colspan="5">loading…</td></tr>`;
+    REPLAYS = await (await fetch("/api/replays")).json();
+  }
+  fillPicker(); $("filter").focus();
+}
+function fillPicker() {
+  const q = $("filter").value.toLowerCase();
+  const rows = REPLAYS.filter((r) => !q || [r.run_id, r.seed, ...r.agents, r.path].join(" ").toLowerCase().includes(q));
+  $("pickerRows").innerHTML = rows.length ? rows.slice(0, 500).map((r) =>
+    `<tr data-path="${esc(r.path)}"><td>${esc(r.run_id ?? "")}</td><td>${r.seed}</td><td>${r.agents.map((a, p) => `<span style="color:${pc(p)}">${esc(a)}</span>`).join(", ")}</td>`
+    + `<td>${r.winner_seat >= 0 ? `P${r.winner_seat}` : "—"}</td><td>${r.turns}</td></tr>`).join("")
+    : `<tr><td colspan="5">No replays found. Run a tournament (e.g. <code>make baselines</code>) to make some.</td></tr>`;
+}
+$("pickerRows").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr[data-path]");
+  if (tr) { $("picker").classList.remove("open"); loadReplay(tr.dataset.path); }
+});
+$("filter").addEventListener("input", fillPicker);
+$("openPicker").onclick = openPicker;
+$("closePicker").onclick = () => $("picker").classList.remove("open");
+
+// ---------------------------------------------------------------- wiring
+for (let p = 0; p < 4; p++) $("pov").insertAdjacentHTML("beforeend", `<option value="${p}">Seat P${p}</option>`);
+$("pov").onchange = () => { pov = +$("pov").value; if (TL) { buildLog(); render(); } };
+$("truth").onchange = () => TL && drawPlayers();
+$("first").onclick = () => go(0);
+$("last").onclick = () => go(TL.steps.length - 1);
+$("prev").onclick = () => go(step - 1);
+$("next").onclick = () => go(step + 1);
+$("prevTurn").onclick = () => turnJump(-1);
+$("nextTurn").onclick = () => turnJump(1);
+$("play").onclick = () => TL && setPlaying(!timer);
+$("speed").onchange = () => timer && setPlaying(true);
+$("slider").oninput = () => go(+$("slider").value);
+$("log").addEventListener("click", (e) => { const d = e.target.closest("[data-i]"); if (d) go(+d.dataset.i); });
+document.addEventListener("keydown", (e) => {
+  if (!TL || e.target.tagName === "INPUT" && e.target.type !== "range" || $("picker").classList.contains("open")) {
+    if (e.key === "Escape") $("picker").classList.remove("open");
+    return;
+  }
+  const keys = {
+    ArrowRight: () => e.shiftKey ? turnJump(1) : go(step + 1),
+    ArrowLeft: () => e.shiftKey ? turnJump(-1) : go(step - 1),
+    " ": () => setPlaying(!timer), Home: () => go(0), End: () => go(TL.steps.length - 1),
+  };
+  if (keys[e.key]) { e.preventDefault(); keys[e.key](); }
+});
+
+const initial = new URLSearchParams(location.search).get("replay");
+if (initial) loadReplay(initial); else openPicker();
+</script>
+</body>
+</html>

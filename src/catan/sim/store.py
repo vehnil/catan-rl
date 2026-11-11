@@ -161,6 +161,18 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def replays(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Matches that have a replay file, with agent specs in seat order (newest first)."""
+        rows = self.conn.execute(
+            """SELECT m.id, m.run_id, m.seed, m.winner_seat, m.turns, m.truncated, m.replay_path,
+                      (SELECT GROUP_CONCAT(agent, ';') FROM
+                          (SELECT agent FROM match_players WHERE match_id = m.id ORDER BY seat))
+                      AS agents
+               FROM matches m WHERE m.replay_path IS NOT NULL ORDER BY m.id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [{**dict(r), "agents": (r["agents"] or "").split(";")} for r in rows]
+
     # ---------------------------------------------------------------- policies
 
     def add_policy(self, manifest: dict[str, Any], path: str | Path) -> str:

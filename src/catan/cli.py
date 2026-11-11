@@ -184,6 +184,39 @@ def export(
 
 
 @app.command()
+def timeline(
+    path: Path,
+    out: Annotated[Path | None, typer.Option("--out", "-o", help="Write here instead of stdout.")] = None,
+) -> None:
+    """Export a replay as per-step JSON (board, actions, events, state, beliefs)."""
+    from catan.sim.replay import load_replay
+    from catan.sim.timeline import build_timeline
+
+    text = json.dumps(build_timeline(load_replay(path)))
+    if out is None:
+        typer.echo(text)
+    else:
+        out.write_text(text)
+        typer.echo(f"wrote {out}")
+
+
+@app.command()
+def view(
+    path: Annotated[Path | None, typer.Argument(help="Replay to open (default: the picker).")] = None,
+    port: int = 8765,
+    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open a browser tab.")] = True,
+    data_dir: DataOpt = "data",
+) -> None:
+    """Open the game viewer in a browser."""
+    from catan.viewer.server import serve
+
+    try:
+        serve(data_dir, path, port, open_browser)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+
+
+@app.command()
 def ratings(data_dir: DataOpt = "data") -> None:
     """Show the rating leaderboard (sorted by mu - 3*sigma)."""
     from catan.sim.store import Store

@@ -72,7 +72,7 @@ def play(
     agents: AgentsOpt = "greedy,random,random,random",
     seed: int = 0,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Print every action.")] = False,
-    board: str = "standard",
+    board: str = "random",
     data_dir: DataOpt = "data",
 ) -> None:
     """Play one game and print the final board."""
@@ -106,10 +106,11 @@ def sim(
     workers: int = 1,
     seed: int = 0,
     save_replays: bool = False,
+    board: str = "random",
     data_dir: DataOpt = "data",
 ) -> None:
     """Run N games of a fixed lineup (seats rotated) and store the results."""
-    from catan.config import TournamentConfig
+    from catan.config import RulesModel, TournamentConfig
     from catan.sim.tournament import run_tournament
 
     cfg = TournamentConfig(
@@ -120,6 +121,7 @@ def sim(
         workers=workers,
         seed=seed,
         save_replays=save_replays,
+        rules=RulesModel(board=board),
         data_dir=data_dir,
     )
     _print_summary(run_tournament(cfg, progress=_progress))

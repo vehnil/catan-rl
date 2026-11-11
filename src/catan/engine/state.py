@@ -30,7 +30,7 @@ from catan.engine.phases import Phase
 class RulesConfig:
     vp_to_win: int = 10
     discard_limit: int = 7
-    board: str = "standard"  # "standard" | "random"
+    board: str = "random"  # "random" (drawn from the game seed) | "standard" (fixed layout)
     avoid_adjacent_red: bool = True
     # Loop / length limits are action counts, never wall-clock (keeps games reproducible).
     max_trade_proposals_per_turn: int = 3

@@ -27,7 +27,7 @@ Resources are `WOOD=0, BRICK=1, SHEEP=2, WHEAT=3, ORE=4` (`constants.py`). Dev c
 |---|---|---|
 | `vp_to_win` | 10 | |
 | `discard_limit` | 7 | More cards than this on a 7 → discard half |
-| `board` | `"standard"` | or `"random"` |
+| `board` | `"random"` | a new layout drawn from the game seed, or `"standard"` for the fixed reference layout |
 | `avoid_adjacent_red` | true | for random boards |
 | `max_trade_proposals_per_turn` | 3 | domestic proposals per turn |
 | `max_actions_per_turn` | 50 | after this, only END_TURN is legal |

@@ -19,7 +19,7 @@ class _Strict(BaseModel):
 class RulesModel(_Strict):
     vp_to_win: int = 10
     discard_limit: int = 7
-    board: Literal["standard", "random"] = "standard"
+    board: Literal["standard", "random"] = "random"
     avoid_adjacent_red: bool = True
     max_trade_proposals_per_turn: int = Field(3, ge=0)
     max_actions_per_turn: int = Field(50, ge=1)

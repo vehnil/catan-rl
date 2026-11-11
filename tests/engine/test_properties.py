@@ -11,7 +11,7 @@ from catan.engine.rules import apply
 from catan.engine.scoring import buildings_vp, longest_road
 from catan.engine.state import GameState
 
-CONFIGS = [RulesConfig(), RulesConfig(board="random", max_turns_per_game=300)]
+CONFIGS = [RulesConfig(board="standard"), RulesConfig(board="random", max_turns_per_game=300)]
 
 
 def check_invariants(s: GameState) -> None:

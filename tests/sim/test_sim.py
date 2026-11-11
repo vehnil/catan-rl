@@ -255,3 +255,30 @@ def test_buffer_gae_per_env_matches_single_env_buffers():
         fill(single, rows, lambda t: 0)
         single.compute_returns({0: last[e]}, 0.99, 0.95)
         assert np.array_equal(mixed.advantages[rows], single.advantages)
+
+
+def test_league_lineup_is_exact_and_shuffled():
+    import numpy as np
+
+    from catan.agents.learned.ppo.league import League
+    from catan.config.models import LeagueConfig
+
+    cfg = LeagueConfig(
+        fixed_opponents=["random", "random", "greedy"], lineup=True, self_play_prob=0
+    )
+    league = League(cfg, [32], np.random.default_rng(0))
+    seats = [[a.name for a in league.sample_opponents()] for _ in range(60)]
+    assert all(sorted(s) == ["greedy", "random", "random"] for s in seats)
+    assert len({s.index("greedy") for s in seats}) == 3  # greedy moves between seats
+    with pytest.raises(ValueError):
+        LeagueConfig(fixed_opponents=["random", "greedy"], lineup=True)
+
+
+def test_policy_lookup_by_training_config_name(tmp_path):
+    with Store(tmp_path / "catan.db") as store:
+        for i, name in enumerate(["stage1-aaa", "stage1-bbb", "stage10-ccc"]):
+            manifest = {"id": f"id{i}", "name": name, "kind": "ppo", "created_at": float(i)}
+            store.add_policy(manifest, tmp_path / name)
+        assert store.policy("stage1")["id"] == "id1"  # newest of stage1-*, not stage10-*
+        assert store.policy("stage1-aaa")["id"] == "id0"  # exact name still wins
+        assert store.policy("stage") is None

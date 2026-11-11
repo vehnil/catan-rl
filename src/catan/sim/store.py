@@ -194,10 +194,21 @@ class Store:
         return str(manifest["id"])
 
     def policy(self, ref: str) -> dict[str, Any] | None:
+        """By id or exact name; otherwise the newest policy from training config ``ref``.
+
+        Trained policies are named ``<config name>-<run id>``, so a curriculum stage
+        can warm-start from "whatever the previous stage produced last".
+        """
         row = self.conn.execute(
             "SELECT * FROM policies WHERE id = ? OR name = ? ORDER BY created_at DESC LIMIT 1",
             (ref, ref),
         ).fetchone()
+        if row is None:
+            row = self.conn.execute(
+                "SELECT * FROM policies WHERE substr(name, 1, ?) = ? ORDER BY created_at DESC"
+                " LIMIT 1",
+                (len(ref) + 1, ref + "-"),
+            ).fetchone()
         return dict(row) if row else None
 
     def policies(self, kind: str | None = None) -> list[dict[str, Any]]:

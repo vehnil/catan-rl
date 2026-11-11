@@ -87,6 +87,14 @@ class LeagueConfig(_Strict):
     snapshot_every: int = Field(20_000, ge=1)  # env steps between snapshots
     max_snapshots: int = 5
     self_play_prob: float = Field(0.5, ge=0, le=1)  # P(an opponent seat is a past snapshot)
+    # True: fixed_opponents is the exact 3-seat lineup (shuffled each game) instead of a pool.
+    lineup: bool = False
+
+    @model_validator(mode="after")
+    def _check_lineup(self) -> LeagueConfig:
+        if self.lineup and len(self.fixed_opponents) != 3:
+            raise ValueError("lineup: true needs exactly 3 fixed_opponents")
+        return self
 
 
 class TrainConfig(_Strict):

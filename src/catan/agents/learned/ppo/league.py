@@ -30,11 +30,18 @@ class League:
             self.snapshots.pop(0)
 
     def sample_opponents(self) -> list[Agent]:
+        lineup = (
+            [str(s) for s in self.rng.permutation(self.cfg.fixed_opponents)]
+            if self.cfg.lineup
+            else None
+        )
         out: list[Agent] = []
-        for _ in range(NUM_PLAYERS - 1):
+        for i in range(NUM_PLAYERS - 1):
             if self.snapshots and self.rng.random() < self.cfg.self_play_prob:
                 model = self.snapshots[int(self.rng.integers(len(self.snapshots)))]
                 out.append(PPOAgent(self.hidden, model=model))
+            elif lineup is not None:
+                out.append(make_agent(lineup[i]))
             else:
                 out.append(make_agent(str(self.rng.choice(self.cfg.fixed_opponents))))
         return out

@@ -29,13 +29,14 @@ Full example: [`experiments/ppo_league.yaml`](../experiments/ppo_league.yaml). A
 
 | Field | Default | Why it matters |
 |---|---|---|
-| `init_policy` | null | Policy id/name to warm-start from (recorded as `parent_id`) |
+| `init_policy` | null | Policy id, name, or training config name (newest policy from that config) to warm-start from; recorded as `parent_id` |
 | `ppo.gamma` | 0.995 | Games are long (~60+ turns, hundreds of decisions) |
 | `ppo.vp_reward_scale` | 0.05 | Dense ΔVP shaping on top of the ±1 outcome |
 | `ppo.num_envs` | 1 | Parallel rollout workers; see below |
 | `league.fixed_opponents` | `[random, greedy]` | Non-snapshot opponent pool |
 | `league.self_play_prob` | 0.5 | P(an opponent seat is a past snapshot) |
 | `league.snapshot_every` / `max_snapshots` | 20,000 / 5 | Snapshot cadence and pool size |
+| `league.lineup` | false | true: `fixed_opponents` is the exact 3-seat lineup (shuffled per game) instead of a pool |
 | `eval_every` / `eval_games` / `eval_opponents` | 50,000 / 40 / 3× random | Periodic evaluation |
 
 ## Results so far

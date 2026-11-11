@@ -2,11 +2,29 @@
 
 Roughly in order. See [goals](goals.md) for the why.
 
+## Up next: behaviour cloning from greedy
+
+The first PPO round (500k steps vs random, then 1M vs greedy) beat random but never beat greedy. It learned to exploit greedy's trade acceptance (greedy only checks its own gain) and almost never built cities. Cloning gives it greedy's play as a starting point, and a direct training signal for the opening, which the end-of-game reward barely reaches (γ = 0.995 over ~200–380 decisions per game).
+
+- [x] Harden greedy's trade acceptance (`max_partner_edge`, plus "never give more cards than you get"). The 1-for-2 exploit is gone. The mirror stays at 25% per seat, greedy still beats random 100/100, and mirror trades drop from 4.9 to 3.4 per game.
+- [ ] Performance first. Training is collection-bound: in a profile of 8k steps, `env.step` took 9.9 s and the PPO update 0.7 s.
+  - [x] Parallel rollout workers (`ppo.num_envs`): one env and policy copy per process, chunked collection. About 2.5× steps/s with 8 workers on the M1. Less than hoped: the efficiency cores are slow, and per-worker speed drops as more run.
+  - [x] ~~Batched inference across envs~~: tried first, but the main process became the bottleneck (about 1 ms per small forward pass plus pipe traffic), capping out at about 1,750 steps/s. Per-worker policy copies replaced it.
+  - [x] `torch.set_num_threads(1)` in each worker.
+  - [x] Vectorise greedy's `_best_offer` (`evaluate_hands`, bit-for-bit equal to `evaluate`): greedy games about 30% faster, identical moves.
+  - [ ] Maybe: overlap the update with the next rollout's collection (workers idle about 15% of the time; costs one update of policy lag).
+  - [ ] Maybe: lower `max_trade_proposals_per_turn` to cut trade-spam decisions (a rules change).
+- [ ] Generate 2–5k greedy-only games in parallel (tournament runner, replays saved).
+- [ ] Dataset: re-run the replays and record each seat's (features with its own beliefs, mask, action, final outcome). Four trajectories per game.
+- [ ] Train the same `ActorCritic`: cross-entropy on greedy's actions for the policy head, the final outcome for the value head. Report held-out accuracy.
+- [ ] Save it as a normal PPO policy, then warm-start PPO from it (`init_policy`) with a lower learning rate.
+- [ ] Capacity check: if imitation accuracy plateaus low, compare a bigger network against richer features to see which one is missing.
+
 ## What already exists
 
 - **Belief tracker** (`player/belief.py`): forward filter and Viterbi over opponents' hands. It rules out impossible hands on builds, offers, accepts, discards and monopoly payouts. It also gives `determinize()` for search.
-- **PPO** (`agents/learned/ppo/`): actor-critic with a scalar value head. Reward is +1 for the winner and −1 for everyone else at the end of the game. The only saved policy (`ppo_small`, 20k steps) is essentially untrained.
-- **Greedy trading:** one-for-one offers that almost always get rejected. Search agents never consider trade proposals.
+- **PPO** (`agents/learned/ppo/`): actor-critic with a scalar value head. Reward is +1 for the winner and −1 for everyone else at the end of the game, plus 0.05 per VP gained (`vp_reward_scale`). Two trained policies from the first round: `8a19bcdc50` (vs random) and `9a4a93bf0a` (vs greedy); neither beats greedy.
+- **Greedy trading:** proposes at most one offer per turn, giving at least as many cards as it asks for, picked by its own evaluation gain. It accepts any offer that raises its own evaluation by more than 2, without looking at the proposer's gain, which PPO learned to exploit. Search agents never consider trade proposals.
 - **Replays** store only `seed + actions`; `catan view` replays them in the browser, with seat views and beliefs.
 
 ## 1. Measurement
@@ -33,7 +51,7 @@ Roughly in order. See [goals](goals.md) for the why.
 
 - [ ] Value head → 4-way win probability (softmax over seats), trained on game outcomes. A move's value = change in my win probability.
 - [ ] Dataset builder: re-run replays to recover each decision's (features, mask, action, outcome).
-- [ ] Behavior cloning from greedy/ISMCTS games, then warm-start PPO from it (`init_policy`).
+- [ ] Behavior cloning from greedy (see the top of this file), later from ISMCTS games.
 - [ ] Expert iteration: ISMCTS guided by the network's policy and value, with the network trained on the search results; repeat.
 
 ## 5. Trading agents
@@ -45,5 +63,4 @@ Roughly in order. See [goals](goals.md) for the why.
 ## 6. Performance (when training gets slow)
 
 - [ ] Fix device handling in `trainer.py` (lines 133 and 154 ignore `device`), then run rollouts on CPU and updates on MPS.
-- [ ] Vectorized environments: N games in worker processes, with their positions batched into one network call.
-- [ ] Speed up `greedy` / `evaluate`, which dominate the cost of opponents during training.
+- [x] Rollout workers and a faster greedy: done (see the top of this file).

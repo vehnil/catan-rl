@@ -97,4 +97,25 @@ for s in stage1_3random stage2_3ppo1 stage3_2ppo1_1greedy; do
 done
 ```
 
-Results: not run yet.
+Results (8 workers; 26 minutes for all three stages):
+
+| Stage | Run → policy | Final eval vs its lineup |
+|---|---|---|
+| `stage1_3random` | → `7d21686065` (PPO v1) | 100% wins, games down from 213 to 121 turns |
+| `stage2_3ppo1` | → `9413f93f8b` (PPO v2) | 80% at the end (92–100% from 300k on), games about 95–110 turns |
+| `stage3_2ppo1_1greedy` | → `cac7b6904c` | 2.5% wins, 3.5 VP |
+
+Stage 1 learned much faster than v3's stage 1 (97.5% at 200k vs 40%), and games got shorter as it went. That fits the speed bonus, though the seeds also differed. Stage 2 beat frozen v1 easily and kept getting faster.
+
+The same comparison for every policy (200 games each, same seeds and seat rotations; 95% interval in brackets):
+
+| Policy | + 2 random + greedy | + 3 greedy |
+|---|---|---|
+| v3 stage 2 (`774c176a44`) | 2.5% [1–6%], 3.91 VP | 0.5%, 3.38 VP |
+| v4 stage 2, PPO v2 (`9413f93f8b`) | 1.5% [1–4%], **4.30 VP** | 0.5%, 3.01 VP |
+| v4 stage 3 (`cac7b6904c`) | 0% [0–2%], 3.19 VP | 0%, 2.76 VP |
+
+There was no gain against greedy:
+- Self-play made the policy faster than v1 (about 95 turns vs 120), but greedy ends these games around turn 65.
+- Training against greedy (stage 3) made it worse, as in v3. It almost never wins, entropy drifts up (0.86 → 1.3), and play degrades.
+- The best policy against greedy is PPO v2, which never played greedy.

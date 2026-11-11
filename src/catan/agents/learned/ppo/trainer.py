@@ -22,14 +22,13 @@ from catan.agents.learned.ppo.agent import PPOAgent
 from catan.agents.learned.ppo.buffer import RolloutBuffer
 from catan.agents.learned.ppo.league import League
 from catan.agents.learned.ppo.model import ActorCritic
-from catan.agents.registry import make_agent
+from catan.agents.learned.ppo.workers import CHUNK, RolloutWorkers, eval_games
 from catan.config.models import TrainConfig
 from catan.engine.actions import NUM_ACTIONS
 from catan.engine.state import RulesConfig
 from catan.env.gym_single import CatanSingleAgentEnv
 from catan.player.features import FEATURE_DIM
 from catan.sim.artifacts import load_policy, resolve_policy_path, save_policy
-from catan.sim.runner import play_game
 from catan.sim.store import Store
 
 
@@ -42,15 +41,13 @@ def evaluate_policy(
     seed: int,
 ) -> dict[str, float]:
     """Learner rotates through all four seats against the given opponents."""
-    wins, vps = 0, []
-    for g in range(games):
-        seat = g % 4
-        lineup = [make_agent(s) for s in opponents]
-        lineup.insert(seat, PPOAgent(hidden, model=model))
-        rec = play_game(lineup, seed + g, rules)
-        wins += rec.winner == seat
-        vps.append(rec.vp[seat])
-    return {"eval_win_rate": wins / games, "eval_mean_vp": float(np.mean(vps))}
+    return _eval_summary(eval_games(model, hidden, opponents, list(range(games)), rules, seed))
+
+
+def _eval_summary(results: list[tuple[int, bool, int]]) -> dict[str, float]:
+    wins = sum(won for _, won, _ in results)
+    vps = [vp for _, _, vp in results]
+    return {"eval_win_rate": wins / len(results), "eval_mean_vp": float(np.mean(vps))}
 
 
 def _ppo_update(
@@ -106,12 +103,26 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
     model.eval()
     opt = torch.optim.Adam(model.parameters(), lr=p.lr, eps=1e-5)
 
-    league = League(cfg.league, p.hidden, rng)
-    env = CatanSingleAgentEnv(
-        opponents=league.sample_opponents, config=rules, vp_reward_scale=p.vp_reward_scale
-    )
-    buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
-    obs, info = env.reset(seed=cfg.seed)
+    workers = None
+    if p.num_envs > 1:
+        workers = RolloutWorkers(
+            p.num_envs, rules, p.vp_reward_scale, p.gamma, cfg.league, p.hidden, cfg.seed
+        )
+        buf = RolloutBuffer(p.rollout_steps + CHUNK, FEATURE_DIM, NUM_ACTIONS)
+    else:
+        league = League(cfg.league, p.hidden, rng)
+        env = CatanSingleAgentEnv(
+            opponents=league.sample_opponents, config=rules, vp_reward_scale=p.vp_reward_scale
+        )
+        buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
+        obs, info = env.reset(seed=cfg.seed)
+
+    def run_eval(seed: int) -> dict[str, float]:
+        if workers is None:
+            return evaluate_policy(model, p.hidden, cfg.eval_opponents, cfg.eval_games, rules, seed)
+        return _eval_summary(
+            workers.evaluate(model, p.hidden, cfg.eval_opponents, cfg.eval_games, rules, seed)
+        )
 
     steps, episodes, t0 = 0, 0, time.perf_counter()
     recent_wins: deque[float] = deque(maxlen=100)
@@ -123,36 +134,53 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
     try:
         while steps < p.total_steps:
             buf.reset()
-            while not buf.full:
-                x = torch.as_tensor(obs, device=p.device).unsqueeze(0)
-                m = torch.as_tensor(info["action_mask"], device=p.device).unsqueeze(0)
-                a, logp, v = model.act(x, m)
-                next_obs, r, term, trunc, next_info = env.step(int(a))
-                if trunc:  # bootstrap through the turn cap instead of treating it as a loss
-                    with torch.no_grad():
-                        r += p.gamma * model(torch.as_tensor(next_obs).unsqueeze(0))[1].item()
-                buf.add(obs, info["action_mask"], int(a), logp.item(), v.item(), r, term or trunc)
-                steps += 1
-                ep_return += r
-                if term or trunc:
-                    episodes += 1
-                    recent_wins.append(float(next_info.get("winner") == next_info["seat"]))
-                    recent_returns.append(ep_return)
-                    ep_return = 0.0
-                    obs, info = env.reset()
-                else:
-                    obs, info = next_obs, next_info
-                if steps % cfg.league.snapshot_every == 0:
-                    league.add_snapshot(model)
-                if steps % cfg.eval_every == 0:
-                    last_eval = evaluate_policy(
-                        model, p.hidden, cfg.eval_opponents, cfg.eval_games, rules, cfg.seed + steps
-                    )
+            if workers is not None:
+                before = steps
+                last_values = {}
+                for w, seg in workers.collect(model, p.rollout_steps):
+                    buf.add_segment(seg, env=w)
+                    last_values[w] = seg["last_value"]
+                    for won, ret in seg["episodes"]:
+                        episodes += 1
+                        recent_wins.append(float(won))
+                        recent_returns.append(ret)
+                steps += buf.ptr
+                if steps // cfg.league.snapshot_every > before // cfg.league.snapshot_every:
+                    workers.add_snapshot(model)
+                if steps // cfg.eval_every > before // cfg.eval_every:
+                    last_eval = run_eval(cfg.seed + steps)
                     log(f"  eval @ {steps}: {last_eval}")
+            else:
+                while not buf.full:
+                    x = torch.as_tensor(obs, device=p.device).unsqueeze(0)
+                    m = torch.as_tensor(info["action_mask"], device=p.device).unsqueeze(0)
+                    a, logp, v = model.act(x, m)
+                    next_obs, r, term, trunc, next_info = env.step(int(a))
+                    if trunc:  # bootstrap through the turn cap instead of treating it as a loss
+                        with torch.no_grad():
+                            r += p.gamma * model(torch.as_tensor(next_obs).unsqueeze(0))[1].item()
+                    buf.add(
+                        obs, info["action_mask"], int(a), logp.item(), v.item(), r, term or trunc
+                    )
+                    steps += 1
+                    ep_return += r
+                    if term or trunc:
+                        episodes += 1
+                        recent_wins.append(float(next_info.get("winner") == next_info["seat"]))
+                        recent_returns.append(ep_return)
+                        ep_return = 0.0
+                        obs, info = env.reset()
+                    else:
+                        obs, info = next_obs, next_info
+                    if steps % cfg.league.snapshot_every == 0:
+                        league.add_snapshot(model)
+                    if steps % cfg.eval_every == 0:
+                        last_eval = run_eval(cfg.seed + steps)
+                        log(f"  eval @ {steps}: {last_eval}")
 
-            with torch.no_grad():
-                last_value = model(torch.as_tensor(obs).unsqueeze(0))[1].item()
-            buf.compute_returns(last_value, p.gamma, p.gae_lambda)
+                with torch.no_grad():
+                    last_values = {0: model(torch.as_tensor(obs).unsqueeze(0))[1].item()}
+            buf.compute_returns(last_values, p.gamma, p.gae_lambda)
             upd = _ppo_update(model, opt, buf, p, rng)
             row = {
                 "steps": steps,
@@ -160,7 +188,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 "win_rate_100": float(np.mean(recent_wins)) if recent_wins else None,
                 "return_100": float(np.mean(recent_returns)) if recent_returns else None,
                 "sps": steps / (time.perf_counter() - t0),
-                "snapshots": len(league.snapshots),
+                "snapshots": len(league.snapshots) if workers is None else workers.snapshots,
                 **upd,
                 **last_eval,
             }
@@ -172,9 +200,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 f"ent {upd['entropy']:.2f} kl {upd['approx_kl']:.4f} sps {row['sps']:.0f}"
             )
 
-        final_eval = evaluate_policy(
-            model, p.hidden, cfg.eval_opponents, cfg.eval_games, rules, cfg.seed + 10**6
-        )
+        final_eval = run_eval(cfg.seed + 10**6)
         manifest, path = save_policy(
             PPOAgent(p.hidden, model=model),
             data_dir,
@@ -197,5 +223,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
         store.finish_run(run_id, {"steps": steps}, status="failed")
         raise
     finally:
+        if workers is not None:
+            workers.close()
         metrics_file.close()
         store.close()

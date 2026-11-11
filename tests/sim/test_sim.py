@@ -175,3 +175,83 @@ def test_ppo_train_smoke(tmp_path):
     with Store(tmp_path / "catan.db") as store:
         assert store.policy(result["policy_id"])["kind"] == "ppo"
         assert store.runs()[0]["status"] == "done"
+
+
+@pytest.mark.slow
+def test_ppo_train_parallel_envs(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+
+    cfg = TrainConfig.model_validate(
+        {
+            "data_dir": str(tmp_path),
+            "rules": {"max_turns_per_game": 120},
+            "ppo": {
+                "total_steps": 256,
+                "rollout_steps": 128,
+                "minibatch": 64,
+                "epochs": 1,
+                "hidden": [32],
+                "num_envs": 2,
+            },
+            "league": {"fixed_opponents": ["random"], "snapshot_every": 100},
+            "eval_every": 200,
+            "eval_games": 3,
+        }
+    )
+    result = train(cfg, log=lambda *_: None)
+    with Store(tmp_path / "catan.db") as store:
+        assert store.runs()[0]["status"] == "done"
+    rows = [
+        json.loads(line) for line in (tmp_path / "runs" / result["run_id"] / "metrics.jsonl").open()
+    ]
+    assert rows[-1]["steps"] == 256 and rows[-1]["snapshots"] == 2
+    assert "eval_win_rate" in rows[-1] and "eval_win_rate" in result
+
+
+@pytest.mark.slow
+def test_parallel_eval_matches_sequential():
+    from catan.agents.learned.ppo.model import ActorCritic
+    from catan.agents.learned.ppo.workers import RolloutWorkers, eval_games
+    from catan.config.models import LeagueConfig
+
+    model = ActorCritic([32])
+    opponents = ["greedy", "random", "random"]
+    expected = eval_games(model, [32], opponents, list(range(5)), QUICK, 11)
+    league = LeagueConfig(fixed_opponents=["random"])
+    workers = RolloutWorkers(2, QUICK, 0.0, 0.995, league, [32], 0)
+    try:
+        assert workers.evaluate(model, [32], opponents, 5, QUICK, 11) == expected
+        segments = workers.collect(model, 200)
+        assert sum(len(seg["actions"]) for _, seg in segments) in range(200, 200 + 64)
+        assert {w for w, _ in segments} == {0, 1}
+    finally:
+        workers.close()
+
+
+def test_buffer_gae_per_env_matches_single_env_buffers():
+    """Interleaved rows from several envs get the same advantages as separate buffers."""
+    import numpy as np
+
+    from catan.agents.learned.ppo.buffer import RolloutBuffer
+
+    rng = np.random.default_rng(0)
+    n, size = 3, 30
+    order = rng.integers(n, size=size)  # which env each row comes from (async arrival)
+    values = rng.normal(size=size).astype(np.float32)
+    rewards = rng.normal(size=size).astype(np.float32)
+    dones = (rng.random(size) < 0.2).astype(np.float32)
+    last = {e: float(rng.normal()) for e in range(n)}
+
+    def fill(buf, rows, env_of):
+        for t in rows:
+            buf.add(np.zeros(4), np.ones(2), 0, 0.0, values[t], rewards[t], dones[t], env=env_of(t))
+
+    mixed = RolloutBuffer(size, 4, 2)
+    fill(mixed, range(size), lambda t: int(order[t]))
+    mixed.compute_returns(last, 0.99, 0.95)
+    for e in range(n):
+        rows = np.flatnonzero(order == e)
+        single = RolloutBuffer(len(rows), 4, 2)
+        fill(single, rows, lambda t: 0)
+        single.compute_returns({0: last[e]}, 0.99, 0.95)
+        assert np.array_equal(mixed.advantages[rows], single.advantages)

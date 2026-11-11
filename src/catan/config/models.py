@@ -77,6 +77,7 @@ class PPOConfig(_Strict):
     hidden: list[int] = [512, 256]
     vp_reward_scale: float = 0.05
     device: str = "cpu"
+    num_envs: int = Field(1, ge=1)  # >1: one env + policy copy per worker process
 
 
 class LeagueConfig(_Strict):

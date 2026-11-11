@@ -76,6 +76,9 @@ class PPOConfig(_Strict):
     max_grad_norm: float = 0.5
     hidden: list[int] = [512, 256]
     vp_reward_scale: float = 0.05
+    # Bonus for winning sooner, linear from the full amount at turn 0 to 0 at fast_win_turns.
+    fast_win_bonus: float = 0.0
+    fast_win_turns: int = Field(200, ge=1)
     device: str = "cpu"
     num_envs: int = Field(1, ge=1)  # >1: one env + policy copy per worker process
 

@@ -21,7 +21,7 @@ The trainer runs the learner in `CatanSingleAgentEnv`, draws opponents from the 
 5. Every `eval_every` steps, play `eval_games` against `eval_opponents`, rotating the learner through all 4 seats.
 6. At the end: a final evaluation, then the policy is saved to `data/policies/<id>` and registered in the store with lineage (`parent_id` if warm-started via `init_policy`).
 
-Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate over the last 100 games, return, steps/sec, losses, entropy, approx KL, clip fraction, and the latest eval.
+Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate, return and game length (turns) over the last 100 games, steps/sec, losses, entropy, approx KL, clip fraction, and the latest eval.
 
 ### Config (`TrainConfig`, YAML)
 
@@ -33,7 +33,8 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `ppo.gamma` | 0.995 | Games are long (~60+ turns, hundreds of decisions) |
 | `ppo.vp_reward_scale` | 0.05 | Dense ΔVP shaping on top of the ±1 outcome |
 | `ppo.num_envs` | 1 | Parallel rollout workers; see below |
-| `league.fixed_opponents` | `[random, greedy]` | Non-snapshot opponent pool |
+| `ppo.fast_win_bonus` / `fast_win_turns` | 0 / 200 | Extra reward for a win, linear from the full bonus at turn 0 to 0 at `fast_win_turns`; losses get none |
+| `league.fixed_opponents` | `[random, greedy]` | Non-snapshot opponent pool. `policy:<ref>` entries are pinned to a policy id at start, loaded once and kept frozen |
 | `league.self_play_prob` | 0.5 | P(an opponent seat is a past snapshot) |
 | `league.snapshot_every` / `max_snapshots` | 20,000 / 5 | Snapshot cadence and pool size |
 | `league.lineup` | false | true: `fixed_opponents` is the exact 3-seat lineup (shuffled per game) instead of a pool |

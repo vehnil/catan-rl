@@ -36,6 +36,8 @@ class CatanSingleAgentEnv(gym.Env):
         win_reward: float = 1.0,
         loss_reward: float = -1.0,
         vp_reward_scale: float = 0.0,
+        fast_win_bonus: float = 0.0,
+        fast_win_turns: int = 200,
     ) -> None:
         self.opponents_factory = opponents
         self.config = config or RulesConfig()
@@ -43,6 +45,10 @@ class CatanSingleAgentEnv(gym.Env):
         self.win_reward = win_reward
         self.loss_reward = loss_reward
         self.vp_reward_scale = vp_reward_scale
+        # Extra reward for winning sooner: the full bonus at turn 0, nothing from fast_win_turns on.
+        # Only wins get it, so there is no incentive to lose quickly.
+        self.fast_win_bonus = fast_win_bonus
+        self.fast_win_turns = fast_win_turns
         self.observation_space = spaces.Box(-np.inf, np.inf, (FEATURE_DIM,), np.float32)
         self.action_space = spaces.Discrete(NUM_ACTIONS)
         self.game: Game | None = None
@@ -80,6 +86,8 @@ class CatanSingleAgentEnv(gym.Env):
         truncated = state.truncated
         if state.done and state.winner >= 0:
             reward += self.win_reward if state.winner == self.seat else self.loss_reward
+            if state.winner == self.seat and self.fast_win_bonus:
+                reward += self.fast_win_bonus * max(0.0, 1 - state.turn / self.fast_win_turns)
         return self._features(), float(reward), terminated, truncated, self._info()
 
     def action_masks(self) -> np.ndarray:

@@ -218,7 +218,7 @@ def test_parallel_eval_matches_sequential():
     opponents = ["greedy", "random", "random"]
     expected = eval_games(model, [32], opponents, list(range(5)), QUICK, 11)
     league = LeagueConfig(fixed_opponents=["random"])
-    workers = RolloutWorkers(2, QUICK, 0.0, 0.995, league, [32], 0)
+    workers = RolloutWorkers(2, QUICK, {}, 0.995, league, [32], 0)
     try:
         assert workers.evaluate(model, [32], opponents, 5, QUICK, 11) == expected
         segments = workers.collect(model, 200)
@@ -282,3 +282,97 @@ def test_policy_lookup_by_training_config_name(tmp_path):
         assert store.policy("stage1")["id"] == "id1"  # newest of stage1-*, not stage10-*
         assert store.policy("stage1-aaa")["id"] == "id0"  # exact name still wins
         assert store.policy("stage") is None
+
+
+def test_fast_win_bonus_only_rewards_wins():
+    import numpy as np
+
+    from catan.agents.baselines import GreedyAgent
+    from catan.env.gym_single import CatanSingleAgentEnv
+
+    def episode(seed, bonus):  # greedy learner on even seeds (wins), random on odd (doesn't)
+        env = CatanSingleAgentEnv(
+            opponents=lambda: [make_agent("random") for _ in range(3)],
+            config=QUICK,
+            learner_seat=0,
+            fast_win_bonus=bonus,
+            fast_win_turns=100,
+        )
+        _, info = env.reset(seed=seed)
+        rng, rewards, greedy = np.random.default_rng(seed), [], GreedyAgent()
+        while True:
+            if seed % 2 == 0:
+                a = greedy.act_state(env.game.state, info["action_mask"], 0)
+            else:
+                a = int(rng.choice(np.flatnonzero(info["action_mask"])))
+            _, r, term, trunc, info = env.step(a)
+            rewards.append(r)
+            if term or trunc:
+                return rewards, info
+
+    seen = set()
+    for seed in range(40):
+        plain, info = episode(seed, 0.0)
+        bonus, _ = episode(seed, 0.5)
+        extra = 0.5 * max(0.0, 1 - info["turns"] / 100) if info.get("winner") == 0 else 0.0
+        assert plain[:-1] == bonus[:-1]
+        assert bonus[-1] - plain[-1] == pytest.approx(extra)
+        seen.add(info.get("winner") == 0)
+        if seen == {True, False}:
+            break
+    assert seen == {True, False}
+
+
+def test_league_loads_stored_policy_opponents_once(tmp_path):
+    import numpy as np
+
+    from catan.agents.learned.ppo.agent import PPOAgent
+    from catan.agents.learned.ppo.league import League
+    from catan.config.models import LeagueConfig
+
+    with Store(tmp_path / "catan.db") as store:
+        manifest, _ = save_policy(PPOAgent([32]), tmp_path, name="v1-run", store=store)
+    cfg = LeagueConfig(fixed_opponents=["policy:v1", "random", "random"], lineup=True)
+    league = League(cfg, [64], np.random.default_rng(0), tmp_path)
+    frozen = [a for _ in range(4) for a in league.sample_opponents() if isinstance(a, PPOAgent)]
+    assert len(frozen) == 4 and len({id(a) for a in frozen}) == 4  # a fresh agent per game
+    assert len({id(a.model) for a in frozen}) == 1  # sharing one frozen model
+    assert frozen[0].hidden == [32] and frozen[0].spec == f"policy:{manifest['id']}"
+    assert not any(p.requires_grad for p in frozen[0].model.parameters())
+
+
+@pytest.mark.slow
+def test_ppo_stage_chain_against_frozen_previous_stage(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+
+    def stage(name, opponents, init=None):
+        cfg = {
+            "name": name,
+            "data_dir": str(tmp_path),
+            "init_policy": init,
+            "rules": {"max_turns_per_game": 12},
+            "ppo": {
+                "total_steps": 128,
+                "rollout_steps": 128,
+                "minibatch": 64,
+                "epochs": 1,
+                "hidden": [32],
+                "num_envs": 2,
+                "fast_win_bonus": 0.5,
+            },
+            "league": {"fixed_opponents": opponents, "lineup": True, "self_play_prob": 0},
+            "eval_every": 10_000,
+            "eval_games": 2,
+            "eval_opponents": opponents,
+        }
+        return train(TrainConfig.model_validate(cfg), log=lambda *_: None)
+
+    first = stage("s1", ["random", "random", "random"])
+    second = stage("s2", ["policy:s1", "policy:s1", "random"], init="s1")
+    with Store(tmp_path / "catan.db") as store:
+        assert store.policy(second["policy_id"])["parent_id"] == first["policy_id"]
+        rows = [
+            json.loads(line)
+            for line in (tmp_path / "runs" / second["run_id"] / "metrics.jsonl").open()
+        ]
+    assert rows[-1]["turns_100"] is not None and "eval_mean_turns" in second

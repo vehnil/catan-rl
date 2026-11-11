@@ -28,7 +28,7 @@ from catan.engine.actions import NUM_ACTIONS
 from catan.engine.state import RulesConfig
 from catan.env.gym_single import CatanSingleAgentEnv
 from catan.player.features import FEATURE_DIM
-from catan.sim.artifacts import load_policy, resolve_policy_path, save_policy
+from catan.sim.artifacts import load_policy, read_manifest, resolve_policy_path, save_policy
 from catan.sim.store import Store
 
 
@@ -39,15 +39,34 @@ def evaluate_policy(
     games: int,
     rules: RulesConfig,
     seed: int,
+    data_dir: str | Path = "data",
 ) -> dict[str, float]:
     """Learner rotates through all four seats against the given opponents."""
-    return _eval_summary(eval_games(model, hidden, opponents, list(range(games)), rules, seed))
+    results = eval_games(model, hidden, opponents, list(range(games)), rules, seed, data_dir)
+    return _eval_summary(results)
 
 
-def _eval_summary(results: list[tuple[int, bool, int]]) -> dict[str, float]:
-    wins = sum(won for _, won, _ in results)
-    vps = [vp for _, _, vp in results]
-    return {"eval_win_rate": wins / len(results), "eval_mean_vp": float(np.mean(vps))}
+def _eval_summary(results: list[tuple[int, bool, int, int]]) -> dict[str, float]:
+    wins = sum(won for _, won, _, _ in results)
+    return {
+        "eval_win_rate": wins / len(results),
+        "eval_mean_vp": float(np.mean([vp for _, _, vp, _ in results])),
+        "eval_mean_turns": float(np.mean([t for _, _, _, t in results])),
+    }
+
+
+def _pin_policies(specs: list[str], data_dir: Path, log: Callable[[str], Any]) -> list[str]:
+    """Resolve each ``policy:<ref>`` to its id once, so every worker and game uses the same one."""
+    out = []
+    for spec in specs:
+        if spec.startswith("policy:"):
+            ref = spec.removeprefix("policy:")
+            pid = read_manifest(resolve_policy_path(ref, data_dir))["id"]
+            if ref != pid:
+                log(f"  {spec} -> policy:{pid}")
+            spec = f"policy:{pid}"
+        out.append(spec)
+    return out
 
 
 def _ppo_update(
@@ -103,30 +122,40 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
     model.eval()
     opt = torch.optim.Adam(model.parameters(), lr=p.lr, eps=1e-5)
 
+    league_cfg = cfg.league.model_copy(
+        update={"fixed_opponents": _pin_policies(cfg.league.fixed_opponents, data_dir, log)}
+    )
+    eval_opponents = _pin_policies(cfg.eval_opponents, data_dir, log)
+    env_kwargs: dict[str, Any] = {
+        "vp_reward_scale": p.vp_reward_scale,
+        "fast_win_bonus": p.fast_win_bonus,
+        "fast_win_turns": p.fast_win_turns,
+    }
     workers = None
     if p.num_envs > 1:
         workers = RolloutWorkers(
-            p.num_envs, rules, p.vp_reward_scale, p.gamma, cfg.league, p.hidden, cfg.seed
+            p.num_envs, rules, env_kwargs, p.gamma, league_cfg, p.hidden, cfg.seed, data_dir
         )
         buf = RolloutBuffer(p.rollout_steps + CHUNK, FEATURE_DIM, NUM_ACTIONS)
     else:
-        league = League(cfg.league, p.hidden, rng)
-        env = CatanSingleAgentEnv(
-            opponents=league.sample_opponents, config=rules, vp_reward_scale=p.vp_reward_scale
-        )
+        league = League(league_cfg, p.hidden, rng, data_dir)
+        env = CatanSingleAgentEnv(opponents=league.sample_opponents, config=rules, **env_kwargs)
         buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
         obs, info = env.reset(seed=cfg.seed)
 
     def run_eval(seed: int) -> dict[str, float]:
         if workers is None:
-            return evaluate_policy(model, p.hidden, cfg.eval_opponents, cfg.eval_games, rules, seed)
+            return evaluate_policy(
+                model, p.hidden, eval_opponents, cfg.eval_games, rules, seed, data_dir
+            )
         return _eval_summary(
-            workers.evaluate(model, p.hidden, cfg.eval_opponents, cfg.eval_games, rules, seed)
+            workers.evaluate(model, p.hidden, eval_opponents, cfg.eval_games, rules, seed)
         )
 
     steps, episodes, t0 = 0, 0, time.perf_counter()
     recent_wins: deque[float] = deque(maxlen=100)
     recent_returns: deque[float] = deque(maxlen=100)
+    recent_turns: deque[int] = deque(maxlen=100)
     ep_return = 0.0
     history: list[dict[str, Any]] = []
     last_eval: dict[str, float] = {}
@@ -140,10 +169,11 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 for w, seg in workers.collect(model, p.rollout_steps):
                     buf.add_segment(seg, env=w)
                     last_values[w] = seg["last_value"]
-                    for won, ret in seg["episodes"]:
+                    for won, ret, turns in seg["episodes"]:
                         episodes += 1
                         recent_wins.append(float(won))
                         recent_returns.append(ret)
+                        recent_turns.append(turns)
                 steps += buf.ptr
                 if steps // cfg.league.snapshot_every > before // cfg.league.snapshot_every:
                     workers.add_snapshot(model)
@@ -168,6 +198,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                         episodes += 1
                         recent_wins.append(float(next_info.get("winner") == next_info["seat"]))
                         recent_returns.append(ep_return)
+                        recent_turns.append(next_info["turns"])
                         ep_return = 0.0
                         obs, info = env.reset()
                     else:
@@ -187,6 +218,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 "episodes": episodes,
                 "win_rate_100": float(np.mean(recent_wins)) if recent_wins else None,
                 "return_100": float(np.mean(recent_returns)) if recent_returns else None,
+                "turns_100": float(np.mean(recent_turns)) if recent_turns else None,
                 "sps": steps / (time.perf_counter() - t0),
                 "snapshots": len(league.snapshots) if workers is None else workers.snapshots,
                 **upd,

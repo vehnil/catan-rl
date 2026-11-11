@@ -22,6 +22,7 @@ import contextlib
 import multiprocessing as mp
 import traceback
 from multiprocessing.connection import Connection, wait
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -48,15 +49,19 @@ def eval_games(
     games: list[int],
     rules: RulesConfig,
     seed: int,
-) -> list[tuple[int, bool, int]]:
-    """Play the given game numbers; the learner sits in seat ``g % 4``. Returns (g, won, vp)."""
+    data_dir: str | Path = "data",
+) -> list[tuple[int, bool, int, int]]:
+    """Play the given game numbers; the learner sits in seat ``g % 4``.
+
+    Returns (g, won, vp, turns) per game.
+    """
     out = []
     for g in games:
         seat = g % 4
-        lineup = [make_agent(s) for s in opponents]
+        lineup = [make_agent(s, data_dir) for s in opponents]
         lineup.insert(seat, PPOAgent(hidden, model=model))
         rec = play_game(lineup, seed + g, rules)
-        out.append((g, rec.winner == seat, rec.vp[seat]))
+        out.append((g, rec.winner == seat, rec.vp[seat], rec.turns))
     return out
 
 
@@ -66,18 +71,20 @@ class _Actor:
     def __init__(
         self,
         rules: RulesConfig,
-        vp_reward_scale: float,
+        env_kwargs: dict[str, Any],
         gamma: float,
         league_cfg: LeagueConfig,
         hidden: list[int],
         seed: int,
+        data_dir: str | Path,
     ) -> None:
         torch.manual_seed(seed)
         self.gamma = gamma
         self.hidden = hidden
-        self.league = League(league_cfg, hidden, np.random.default_rng(seed))
+        self.data_dir = data_dir
+        self.league = League(league_cfg, hidden, np.random.default_rng(seed), data_dir)
         self.env = CatanSingleAgentEnv(
-            opponents=self.league.sample_opponents, config=rules, vp_reward_scale=vp_reward_scale
+            opponents=self.league.sample_opponents, config=rules, **env_kwargs
         )
         self.model = ActorCritic(hidden).eval()
         self.obs, self.info = self.env.reset(seed=seed)
@@ -93,7 +100,7 @@ class _Actor:
             "rewards": np.zeros(steps, np.float32),
             "dones": np.zeros(steps, np.float32),
         }
-        episodes: list[tuple[bool, float]] = []
+        episodes: list[tuple[bool, float, int]] = []  # (won, return, turns)
         for t in range(steps):
             mask = self.info["action_mask"]
             a, logp, v = self.model.act(
@@ -108,7 +115,8 @@ class _Actor:
             seg["rewards"][t], seg["dones"][t] = r, term or trunc
             self.ep_return += r
             if term or trunc:
-                episodes.append((next_info.get("winner") == next_info["seat"], self.ep_return))
+                won = next_info.get("winner") == next_info["seat"]
+                episodes.append((won, self.ep_return, next_info["turns"]))
                 self.ep_return = 0.0
                 self.obs, self.info = self.env.reset()
             else:
@@ -140,7 +148,8 @@ def _worker(conn: Connection, *actor_args: Any) -> None:
                 model = ActorCritic(hidden)
                 model.load_state_dict(state)
                 model.eval()
-                conn.send(("ok", eval_games(model, hidden, opponents, games, rules, seed)))
+                result = eval_games(model, hidden, opponents, games, rules, seed, actor.data_dir)
+                conn.send(("ok", result))
             elif cmd == "close":
                 conn.close()
                 return
@@ -159,11 +168,12 @@ class RolloutWorkers:
         self,
         n: int,
         rules: RulesConfig,
-        vp_reward_scale: float,
+        env_kwargs: dict[str, Any],
         gamma: float,
         league_cfg: LeagueConfig,
         hidden: list[int],
         seed: int,
+        data_dir: str | Path = "data",
     ) -> None:
         self.n = n
         self.max_snapshots = league_cfg.max_snapshots
@@ -173,7 +183,7 @@ class RolloutWorkers:
         self.procs = []
         for i in range(n):
             parent, child = ctx.Pipe()
-            args = (rules, vp_reward_scale, gamma, league_cfg, hidden, seed * 1000 + i)
+            args = (rules, env_kwargs, gamma, league_cfg, hidden, seed * 1000 + i, data_dir)
             proc = ctx.Process(target=_worker, args=(child, *args), daemon=True)
             proc.start()
             child.close()
@@ -224,7 +234,7 @@ class RolloutWorkers:
         games: int,
         rules: RulesConfig,
         seed: int,
-    ) -> list[tuple[int, bool, int]]:
+    ) -> list[tuple[int, bool, int, int]]:
         state = _state(model)
         for i, c in enumerate(self.conns):
             c.send(("eval", state, hidden, opponents, list(range(i, games, self.n)), rules, seed))

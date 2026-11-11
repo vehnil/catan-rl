@@ -1,0 +1,19 @@
+# Curriculum stage 1: learn the basics against random opponents (~10 min on CPU).
+name: ppo_stage1_random
+seed: 0
+ppo:
+  total_steps: 500000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+league:
+  fixed_opponents: [random]
+  snapshot_every: 50000
+  max_snapshots: 5
+  self_play_prob: 0.2
+eval_every: 100000
+eval_games: 40
+eval_opponents: [random, random, random]

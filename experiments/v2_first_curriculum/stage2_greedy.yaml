@@ -1,0 +1,20 @@
+# Curriculum stage 2: warm-start from stage 1, play against greedy and own snapshots.
+name: ppo_stage2_greedy
+seed: 1
+init_policy: 8a19bcdc50  # stage-1 policy (ppo_stage1_random)
+ppo:
+  total_steps: 1000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+league:
+  fixed_opponents: [random, greedy]
+  snapshot_every: 100000
+  max_snapshots: 5
+  self_play_prob: 0.4
+eval_every: 200000
+eval_games: 40
+eval_opponents: [greedy, greedy, greedy]

@@ -7,7 +7,7 @@ Roughly in order. See [goals](goals.md) for the why.
 - **Belief tracker** (`player/belief.py`): forward filter and Viterbi over opponents' hands. It rules out impossible hands on builds, offers, accepts, discards and monopoly payouts. It also gives `determinize()` for search.
 - **PPO** (`agents/learned/ppo/`): actor-critic with a scalar value head. Reward is +1 for the winner and −1 for everyone else at the end of the game. The only saved policy (`ppo_small`, 20k steps) is essentially untrained.
 - **Greedy trading:** one-for-one offers that almost always get rejected. Search agents never consider trade proposals.
-- **Replays** store only `seed + actions`; no GUI exists.
+- **Replays** store only `seed + actions`; `catan view` replays them in the browser, with seat views and beliefs.
 
 ## 1. Measurement
 
@@ -17,9 +17,10 @@ Roughly in order. See [goals](goals.md) for the why.
 
 ## 2. Game export and the GUI
 
-- [ ] Timeline export: replay → JSON with the board spelled out plus per-step state and public events. This is also a readable game log.
-- [ ] `catan view <replay>`: a small local server (stdlib only) and one HTML page with an SVG board, step slider, play/pause, player panels and an event log.
-- [ ] A seat point-of-view mode that hides opponents' hands and shows the belief tracker's guesses next to the truth.
+- [x] Timeline export: replay → JSON with the board spelled out plus per-step state and public events. This is also a readable game log.
+- [x] `catan view <replay>`: a small local server (stdlib only) and one HTML page with an SVG board, step slider, play/pause, player panels and an event log.
+- [x] A seat point-of-view mode that hides opponents' hands and shows the belief tracker's guesses next to the truth.
+- [ ] Later: better graphics. Today the board is flat-colored hexes and simple piece shapes, and seat colors are the main cue, which is enough for now. Possible upgrades: terrain textures or icons, real piece art, resource-card icons, and animations for rolls, steals and trades.
 
 ## 3. Better hand inference
 

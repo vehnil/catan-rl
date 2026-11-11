@@ -22,7 +22,7 @@ bench:
 	$(UV) catan benchmark --games 200 --workers 8
 
 baselines:
-	$(UV) catan tournament experiments/baselines.yaml
+	$(UV) catan tournament experiments/v1_examples/baselines.yaml
 
 ppo-small:
-	$(UV) catan train experiments/ppo_small.yaml
+	$(UV) catan train experiments/v1_examples/ppo_small.yaml

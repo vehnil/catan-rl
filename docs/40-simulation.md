@@ -22,7 +22,7 @@ Every format rotates seats, because placing first is an advantage.
 `run_tournament(cfg)` creates a run, plays the games, saves replays, writes each match to the store, updates ratings, and records a summary with per-agent stats and 95% Wilson confidence intervals.
 
 ```yaml
-# experiments/strategies_round_robin.yaml
+# experiments/v1_examples/strategies_round_robin.yaml
 name: strategies
 format: round_robin
 agents: [greedy, "greedy:preset=expansion", "greedy:preset=cities", "greedy:preset=development", "opening_bandit:budget=32"]
@@ -103,8 +103,8 @@ Run with `uv run --no-editable catan …`.
 | `catan agents` | List agent names |
 | `catan play -a "greedy,random,random,random" -v` | One game, optionally printing every action |
 | `catan sim -a … --games 200 --workers 8` | Fixed-lineup tournament |
-| `catan tournament experiments/x.yaml` | Tournament from a config |
-| `catan train experiments/ppo_small.yaml` | PPO training |
+| `catan tournament experiments/<version>/x.yaml` | Tournament from a config |
+| `catan train experiments/v1_examples/ppo_small.yaml` | PPO training |
 | `catan replay <file> [--step] [--seat N]` | Re-simulate, render, verify |
 | `catan view [file] [--port] [--no-open]` | Browser viewer for stored games |
 | `catan timeline <file> [-o out.json]` | Export a replay as per-step JSON |

@@ -35,7 +35,7 @@ src/catan/
   cli.py     `catan` command
 docs/        in-depth documentation (start at docs/README.md)
 notes/       project goals and next steps
-experiments/ example YAML configs
+experiments/ versioned YAML configs (see experiments/README.md)
 data/        generated output (gitignored): catan.db, policies/, replays/, runs/
 ```
 

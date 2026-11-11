@@ -25,7 +25,7 @@ Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, wi
 
 ### Config (`TrainConfig`, YAML)
 
-Full example: [`experiments/ppo_league.yaml`](../experiments/ppo_league.yaml). All fields and defaults are in `config/models.py`. Unknown keys are rejected, so typos fail immediately. The fields that matter most:
+Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_examples/ppo_league.yaml). All fields and defaults are in `config/models.py`. Unknown keys are rejected, so typos fail immediately. The fields that matter most:
 
 | Field | Default | Why it matters |
 |---|---|---|
@@ -41,7 +41,7 @@ Full example: [`experiments/ppo_league.yaml`](../experiments/ppo_league.yaml). A
 
 ## Results so far
 
-`experiments/ppo_small.yaml` (20k steps, about 30 s on CPU, random opponents): training win rate 0.33 → 0.46; final eval 40% over 20 games, where chance is 25%. That only shows the loop learns. A real result needs millions of steps against greedy.
+`experiments/v1_examples/ppo_small.yaml` (20k steps, about 30 s on CPU, random opponents): training win rate 0.33 → 0.46; final eval 40% over 20 games, where chance is 25%. That only shows the loop learns. A real result needs millions of steps against greedy.
 
 ## Practical notes
 

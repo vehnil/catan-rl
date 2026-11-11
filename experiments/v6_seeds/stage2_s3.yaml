@@ -1,0 +1,26 @@
+# Stage 2 of 2 (draft; revisit after stage 1): each learner against the other three, frozen.
+# All four learners use identical settings (v5 learner C's); only the seed differs.
+# Only the learner trains. See ../README.md.
+name: v6_stage2_s3
+seed: 42
+init_policy: v6_stage1_s3  # this learner's newest stage-1 policy
+ppo:
+  total_steps: 1000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.1
+  entropy_coef: 0.01
+  fast_win_bonus: 0.5
+  fast_win_turns: 200
+  num_envs: 2
+league:
+  fixed_opponents: [policy:v6_stage1_s1, policy:v6_stage1_s2, policy:v6_stage1_s4]
+  lineup: true
+  self_play_prob: 0.0
+  snapshot_every: 10000000  # unused without self-play
+eval_every: 100000
+eval_games: 40
+eval_opponents: [policy:v6_stage1_s1, policy:v6_stage1_s2, policy:v6_stage1_s4]

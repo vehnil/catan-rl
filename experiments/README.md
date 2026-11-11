@@ -187,3 +187,28 @@ Round-robin of the four plus v4's PPO v2 (400 games, every 4-of-5 lineup, seats 
 - **Training only against random gave the best yardstick scores yet** (A, B, C: 4.6–4.8 VP against greedy). Training against greedy hasn't helped so far.
 - **The speed bonus made no clear difference** against random or greedy (A vs B), though B finished last in the round-robin.
 - **C (2× reward per VP) is strong against other PPO policies,** almost matching PPO v2, which trained three times as long. That's one seed per setting, so v6 repeats C's settings with four seeds.
+
+### v6_seeds: one learner, four seeds
+
+v5 as intended. Four **separate** learners, each its own network, with **identical settings**: v5 learner C's (`vp_reward_scale: 0.1`, speed bonus 0.5 over 200 turns, `entropy_coef: 0.01`). Only the seed differs, so each sees its own boards, dice and games. They don't share weights; each one's workers pool their own experience into one update every 4,096 decisions (about 10–30 games).
+
+| Stage | Opponents | Steps per learner | Seeds |
+|---|---|---|---|
+| `stage1_s1..s4` | random × 3 | 500k | 30–33 |
+| `stage2_s1..s4` (draft) | the other three learners' stage-1 policies, frozen | 1M | 40–43 |
+
+Questions for stage 1:
+- **How much do identical learners differ by seed alone?** v5's four settings ended up close against random and greedy but far apart in the round-robin. If v6's seeds spread just as widely, v5's differences were mostly luck.
+- **Is C's round-robin strength real?**
+
+Stage 2 is a draft, to revisit after stage 1. One option from [findings](../notes/findings.md) H3 is to keep about 20% random seats alongside the frozen peers, to avoid overfitting to them.
+
+Run one stage at a time, then compare the four (the greedy yardstick plus a round-robin with v5 C and v4 PPO v2) before the next:
+
+```bash
+for l in s1 s2 s3 s4; do
+  catan train experiments/v6_seeds/stage1_$l.yaml > data/v6_stage1_$l.log 2>&1 &
+done; wait
+```
+
+Results: not run yet.

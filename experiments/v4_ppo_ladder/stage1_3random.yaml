@@ -1,0 +1,24 @@
+# Stage 1 of 3: learn the basics against three random players. Produces PPO v1.
+# Only the learner trains; opponents are fixed. Wins pay more the sooner they come.
+# See ../README.md.
+name: v4_stage1_3random
+seed: 0
+ppo:
+  total_steps: 500000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  fast_win_bonus: 0.5  # +0.5 for a win at turn 0, shrinking linearly to 0 at turn 200
+  fast_win_turns: 200
+  num_envs: 8
+league:
+  fixed_opponents: [random, random, random]
+  lineup: true
+  self_play_prob: 0.0
+  snapshot_every: 10000000  # unused without self-play
+eval_every: 100000
+eval_games: 40
+eval_opponents: [random, random, random]

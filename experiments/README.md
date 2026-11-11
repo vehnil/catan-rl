@@ -73,3 +73,28 @@ Results (8 workers, about 2,600 steps/s):
 | `stage4_3greedy` | | not run |
 
 Stage 2 stalled. Wins stayed at 0–2.5% and VP at about 3.2–3.5 for all 1M steps, while entropy rose from 1.62 to 1.89. Greedy cashes in on the random players' mistakes and ends the game around turn 60, long before the policy reaches 10 VP. So the policy loses every game, the value head learns "I lose", and only the small VP reward is left. More greedy players would only make that worse, so the ladder was stopped.
+
+### v4_ppo_ladder: PPO against frozen PPO
+
+The policy learns to win against earlier versions of itself, then meets greedy:
+
+| Stage | Opponents (exact lineup) | Steps | Warm start |
+|---|---|---|---|
+| `stage1_3random` | random × 3 | 500k | from scratch (produces PPO v1) |
+| `stage2_3ppo1` | PPO v1 × 3 (frozen) | 1M | stage 1 |
+| `stage3_2ppo1_1greedy` | PPO v1 × 2 (frozen), greedy | 1M | stage 2 |
+
+- **Only the learner trains.** A `policy:<ref>` opponent is resolved to a policy id when the run starts (the log shows which one), loaded once, and kept frozen.
+- **`policy:v4_stage1_3random`** means the newest policy trained by stage 1.
+- **Faster wins pay more** (`fast_win_bonus: 0.5`, `fast_win_turns: 200`): +0.5 on top of +1 for a win at turn 0, shrinking linearly to nothing by turn 200. Losses get no bonus, so there's no reason to lose quickly.
+- **Game length is tracked:** `turns_100` in training and `eval_mean_turns` in evals.
+
+The question to answer: does stage 3 (2 frozen v1 + greedy) do better than v3's stage 2 (2 random + greedy: 2.5% wins, 4.1 VP)? If it does, build the full ladder.
+
+```bash
+for s in stage1_3random stage2_3ppo1 stage3_2ppo1_1greedy; do
+  catan train experiments/v4_ppo_ladder/$s.yaml || break
+done
+```
+
+Results: not run yet.

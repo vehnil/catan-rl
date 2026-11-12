@@ -45,7 +45,10 @@ The first PPO round (500k steps vs random, then 1M vs greedy) beat random but ne
     - The learner samples without building a `Categorical`. Bit-identical, same RNG stream.
     - Opponents run the policy in NumPy and sample with the agent's NumPy RNG. Same distribution, different random stream.
   - Scaling on this M1 is the bigger limit. Six workers at once give only about 2.3× one worker against random opponents, and about 1.75× with network opponents (each of those networks is about 2.8 MB, and many snapshots compete for the cache). The machine has 4 performance and 4 efficiency cores, plus background load. More cores (option D) beats further code work here.
-  - [ ] Maybe: batch network decisions across several games per worker (option B, about 1.5× estimated).
+  - [x] **Batch network decisions across games (`ppo.games_per_worker`, Nov 2026):** about 2× per worker with six workers at once (290 → 575 steps/s at 32 games), but only about 1.0–1.45× running alone.
+    - It's mainly a memory effect: one read of the weights per batch instead of one per decision.
+    - Batches average about 8 games for the learner and 7 for current-policy opponents. Past snapshots don't batch (about 1.2), being spread over many models.
+    - A first version that kept every game in lockstep didn't help at all: opponents move in bursts, so batches averaged 1.9.
   - [ ] Maybe: lower `max_trade_proposals_per_turn` to cut trade-spam decisions (a rules change).
 - [ ] Generate 2–5k greedy-only games in parallel (tournament runner, replays saved).
 - [ ] Dataset: re-run the replays and record each seat's (features with its own beliefs, mask, action, final outcome). Four trajectories per game.

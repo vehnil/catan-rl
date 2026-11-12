@@ -36,7 +36,15 @@ class PPOAgent(Agent):
         # NumPy forward and sampling: at batch size 1 torch's per-call overhead dominates.
         # Same distribution (softmax over the legal actions' logits) as the torch path,
         # but a different random stream, so games differ from runs before this change.
-        logits = self.model.policy_logits_numpy(encode(obs, self.belief))
+        return self.choose(obs, self.model.policy_logits_numpy(self.features(obs)))
+
+    # act() in two halves, so a driver can batch the forward pass across games:
+    # features() for each pending agent, one policy_logits_numpy() on the stack, choose().
+
+    def features(self, obs: Observation) -> np.ndarray:
+        return encode(obs, self.belief)
+
+    def choose(self, obs: Observation, logits: np.ndarray) -> int:
         legal = np.flatnonzero(obs.legal_mask)
         z = logits[legal]
         if self.deterministic:

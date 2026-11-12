@@ -15,6 +15,7 @@ ppo:
   vp_reward_scale: 0.05
   entropy_coef: 0.01
   num_envs: 2
+  games_per_worker: 32  # batched network decisions; ~2x steps/s with three runs at once
 league:
   fixed_opponents: [random, "greedy:epsilon=0.5", greedy]  # pool: each fixed seat drawn uniformly
   lineup: false

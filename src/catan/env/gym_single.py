@@ -3,6 +3,11 @@
 Opponents act inside ``step`` until it is the learner's move again (or the
 game ends). The legal-action mask is exposed via ``info["action_mask"]`` and
 ``action_masks()`` (the sb3-contrib MaskablePPO convention).
+
+``reset``/``step`` are also available in pieces (``begin_reset``/``begin_step``,
+``run_opponents``, ``finish_reset``/``finish_step``) so a driver running many
+envs can pause each one when a network opponent must move, batch those
+decisions across envs, and resume with ``opponent_move``.
 """
 
 from __future__ import annotations
@@ -57,6 +62,12 @@ class CatanSingleAgentEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
+        self.begin_reset(seed=seed)
+        self.run_opponents()
+        return self.finish_reset()
+
+    def begin_reset(self, seed: int | None = None) -> None:
+        """Start a new game; opponents seated before the learner have not moved yet."""
         super().reset(seed=seed)
         game_seed = int(self.np_random.integers(2**31)) if seed is None else seed
         self.game = Game(game_seed, self.config)
@@ -72,16 +83,27 @@ class CatanSingleAgentEnv(gym.Env):
         for i, s in enumerate(q for q in range(NUM_PLAYERS) if q != self.seat):
             opps[i].reset(s, np.random.default_rng(game_seed + 1 + s))
             self.agents[s] = opps[i]
-        self._advance()
+        self._pending: int | None = None
+
+    def finish_reset(self):
         return self._features(), self._info()
 
     def step(self, action: int):
+        self.begin_step(action)
+        self.run_opponents()
+        return self.finish_step()
+
+    def begin_step(self, action: int) -> None:
+        """Apply the learner's action; opponents have not replied yet."""
+        assert self.game is not None
+        self._vp_before = self.game.state.total_vp(self.seat)
+        self._dispatch(self.game.step(int(action)))
+
+    def finish_step(self):
+        """Reward and next observation, once ``run_opponents`` has returned None."""
         assert self.game is not None
         state = self.game.state
-        vp_before = state.total_vp(self.seat)
-        self._dispatch(self.game.step(int(action)))
-        self._advance()
-        reward = self.vp_reward_scale * (state.total_vp(self.seat) - vp_before)
+        reward = self.vp_reward_scale * (state.total_vp(self.seat) - self._vp_before)
         terminated = state.done and not state.truncated
         truncated = state.truncated
         if state.done and state.winner >= 0:
@@ -102,14 +124,32 @@ class CatanSingleAgentEnv(gym.Env):
 
     # ------------------------------------------------------------------
 
-    def _advance(self) -> None:
-        """Let opponents move until the learner must act or the game ends."""
-        assert self.game is not None
+    def run_opponents(self, pause_for: Callable[[Agent], bool] | None = None) -> Agent | None:
+        """Let opponents move until the learner must act or the game ends, and return None.
+
+        With ``pause_for``, stop instead when an opponent it matches must move, and return
+        that agent: its observation is ``pending_observation()``, and its move goes in with
+        ``opponent_move``; then call this again."""
+        assert self.game is not None and self._pending is None
         while not self.game.done and self.game.actor != self.seat:
             p = self.game.actor
-            a = self.agents[p].act(observe(self.game.state, p))
+            agent = self.agents[p]
+            if pause_for is not None and pause_for(agent):
+                self._pending = p
+                return agent
+            a = agent.act(observe(self.game.state, p))
             self._dispatch(self.game.step(a))
         self._obs = observe(self.game.state, self.seat)
+        return None
+
+    def pending_observation(self) -> Observation:
+        assert self.game is not None and self._pending is not None
+        return observe(self.game.state, self._pending)
+
+    def opponent_move(self, action: int) -> None:
+        assert self.game is not None and self._pending is not None
+        self._pending = None
+        self._dispatch(self.game.step(int(action)))
 
     def _dispatch(self, events) -> None:
         for e in events:

@@ -23,7 +23,7 @@ from catan.agents.learned.ppo.agent import PPOAgent
 from catan.agents.learned.ppo.buffer import RolloutBuffer
 from catan.agents.learned.ppo.league import League
 from catan.agents.learned.ppo.model import ActorCritic
-from catan.agents.learned.ppo.workers import CHUNK, RolloutWorkers, eval_games
+from catan.agents.learned.ppo.workers import RolloutWorkers, eval_games
 from catan.config.models import TrainConfig
 from catan.engine.actions import NUM_ACTIONS
 from catan.engine.state import RulesConfig
@@ -210,11 +210,19 @@ def train(
         # New worker seeds on resume, so the restarted workers don't replay the same games.
         worker_seed = cfg.seed if saved is None else cfg.seed + saved["steps"]
         workers = RolloutWorkers(
-            p.num_envs, rules, env_kwargs, p.gamma, league_cfg, p.hidden, worker_seed, data_dir
+            p.num_envs,
+            rules,
+            env_kwargs,
+            p.gamma,
+            league_cfg,
+            p.hidden,
+            worker_seed,
+            data_dir,
+            p.games_per_worker,
         )
         for snap in saved["snapshots"] if saved is not None else []:
             workers.add_snapshot_state(snap)
-        buf = RolloutBuffer(p.rollout_steps + CHUNK, FEATURE_DIM, NUM_ACTIONS)
+        buf = RolloutBuffer(p.rollout_steps + workers.chunk_rows, FEATURE_DIM, NUM_ACTIONS)
     else:
         buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
         if saved is None:

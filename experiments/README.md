@@ -306,7 +306,7 @@ The plain recipe nearly every self-play project starts from, and that we had nev
 - **Settings, frozen for v7:**
   - 20M steps, linear learning-rate decay from 2.5e-4.
   - The plain reward: ±1 plus 0.05 per VP, no speed bonus.
-  - `[512, 256]` MLP, `num_envs: 2`.
+  - `[512, 256]` MLP, `num_envs: 2` with `games_per_worker: 32`.
   - Checkpoints and resumable state every 1M.
 - **Three seeds,** s1–s3 (seeds 50–52), run at once overnight.
 - **`smoke.yaml`:** a 200k-step check of the same setup.

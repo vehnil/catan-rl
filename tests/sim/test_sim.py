@@ -660,3 +660,92 @@ def test_league_latest_policy_seats():
     mixed.latest = current
     kinds = [a.name for _ in range(200) for a in mixed.sample_opponents()]
     assert 0.4 < kinds.count("ppo") / len(kinds) < 0.6
+
+
+def _actors(games, seed=3, **league):
+    from catan.agents.learned.ppo.model import ActorCritic
+    from catan.agents.learned.ppo.workers import _Actor, _BatchActor
+    from catan.config.models import LeagueConfig
+
+    cfg = LeagueConfig(
+        **{
+            "fixed_opponents": ["random", "greedy:epsilon=0.5"],
+            "latest_prob": 0.4,
+            "self_play_prob": 0.5,
+            **league,
+        }
+    )
+    args = (QUICK, {"vp_reward_scale": 0.05}, 0.995, cfg, [32], seed, "data")
+    actor = _Actor(*args) if games == 0 else _BatchActor(games, *args)
+    actor.league.add_snapshot(ActorCritic([32]))
+    return actor
+
+
+@pytest.mark.slow
+def test_batched_actor_with_one_game_reproduces_unbatched_actor():
+    """Same seeds, same RNG streams, same order of play: pausing for network opponents and
+    resuming must not change a single transition. (Run one after the other: both use torch's
+    global RNG, which each worker process has to itself.)"""
+    import numpy as np
+
+    def run(games):
+        actor = _actors(games)
+        return [actor.collect(600) if games == 0 else actor.collect(600)[0][1] for _ in range(4)]
+
+    plain, batched = run(0), run(1)
+    for a, b in zip(plain, batched, strict=True):
+        for f in ("obs", "masks", "actions", "logprobs", "values", "rewards", "dones"):
+            assert np.array_equal(a[f], b[f]), f
+        assert a["episodes"] == b["episodes"] and a["last_value"] == b["last_value"]
+    assert sum(len(seg["episodes"]) for seg in plain) >= 2  # covers game end + reset mid-tick
+
+
+@pytest.mark.slow
+def test_batched_actor_invariants_with_several_games():
+    import numpy as np
+
+    actor = _actors(4, latest_prob=0.8)
+    episodes = 0
+    for _ in range(10):
+        segs = actor.collect(300)
+        assert [k for k, _ in segs] == [0, 1, 2, 3]
+        assert 300 <= sum(len(s["actions"]) for _, s in segs) < 300 + 4  # one round of overshoot
+        for _, s in segs:
+            assert (
+                sum(s["actions"]) >= 0
+                and s["masks"][np.arange(len(s["actions"])), s["actions"]].all()
+            )
+            assert int(s["dones"].sum()) == len(s["episodes"])
+            for won, ret, turns in s["episodes"]:
+                assert turns > 0 and (won == (ret > 0.5) or not won)
+            episodes += len(s["episodes"])
+    assert episodes > 0
+
+
+@pytest.mark.slow
+def test_ppo_train_with_games_per_worker(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+
+    cfg = TrainConfig.model_validate(
+        {
+            "data_dir": str(tmp_path),
+            "rules": {"max_turns_per_game": 12},
+            "ppo": {
+                "total_steps": 512,
+                "rollout_steps": 256,
+                "minibatch": 64,
+                "epochs": 1,
+                "hidden": [32],
+                "num_envs": 2,
+                "games_per_worker": 3,
+            },
+            "league": {"fixed_opponents": ["random"], "latest_prob": 0.5, "snapshot_every": 200},
+            "eval_every": 10_000,
+            "eval_games": 2,
+        }
+    )
+    result = train(cfg, log=lambda *_: None)
+    rows = _rows(tmp_path, result["run_id"])
+    assert rows[-1]["steps"] >= 512 and rows[-1]["episodes"] > 0
+    with pytest.raises(ValueError):
+        TrainConfig.model_validate({"ppo": {"games_per_worker": 2}})  # needs num_envs > 1

@@ -37,6 +37,7 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `ppo.gamma` | 0.995 | Games are long (~60+ turns, hundreds of decisions) |
 | `ppo.vp_reward_scale` | 0.05 | Dense ΔVP shaping on top of the ±1 outcome |
 | `ppo.num_envs` | 1 | Parallel rollout workers; see below |
+| `ppo.games_per_worker` | 1 | Games each worker plays side by side, batching their network decisions; see below. Needs `num_envs > 1` |
 | `ppo.target_kl` | null | Stop an update's epochs early once their mean KL exceeds this |
 | `ppo.lr_schedule` | constant | `linear` decays the learning rate to 0 at `total_steps`, standard for long runs |
 | `ppo.fast_win_bonus` / `fast_win_turns` | 0 / 200 | Extra reward for a win, linear from the full bonus at turn 0 to 0 at `fast_win_turns`; losses get none |
@@ -80,6 +81,12 @@ catan train experiments/v7_baseline/baseline_s1.yaml --resume <run id or config 
   - It runs the update.
 
   Episodes continue across rollouts. Snapshots and evals happen between rollouts, and eval games are split across the workers. `num_envs: 1` (the default) keeps the original single-process loop exactly. Parallel runs are reproducible only up to timing: the order in which chunks arrive decides the rollout's row order, so floating-point sums (and later the weights) can differ in the last digits between two runs of the same config. Use `num_envs: 1` when you need runs that match exactly.
+- **Batched games (`ppo.games_per_worker`).** With more than one, each worker plays that many games side by side. Every game always waits on exactly one network decision: the learner's, or a network opponent's (random and greedy opponents move inline). Each round, the worker runs the largest group of games waiting on the same model as one batched forward pass.
+  - **What batches:** the learner, and current-policy opponents (`latest_prob`), share one model across games, so they batch well. Past snapshots are spread over many models and mostly run one at a time.
+  - **Why it helps:** at batch size 1, per-call overhead and reading the roughly 2.8 MB of weights from memory dominate. Under load the weights get evicted from the cache between calls, which made this the bottleneck.
+  - **Measured on the M1** (six workers at once, v7 opponent mix): about 290 steps/s per worker with 1 game, 334 with 16, 575 with 32, and 603 with 64. Running alone, the gain is small (about 1.0–1.45×), because the weights stay in cache.
+  - **Rollout layout:** each game is its own env for GAE (id `worker × games_per_worker + game`). Workers get longer collect messages (`16 × games_per_worker` steps), since each message ends by playing every game on to its next learner decision.
+  - **Exactness:** with one game, the batched worker reproduces the unbatched one exactly. A test checks this.
 
   On an M1 (4 performance + 4 efficiency cores), 8 workers collected about 2,500 steps/s against random/greedy/snapshot opponents, against about 1,000 in one process. That was measured with a background system process using more than one core. Workers sit idle during the update, which is about 15% of a rollout.
 - **Scripts that call `train()` with `num_envs > 1` need an `if __name__ == "__main__":` guard.** Workers are spawned, and spawning re-imports the main script. The `catan train` CLI is already guarded.

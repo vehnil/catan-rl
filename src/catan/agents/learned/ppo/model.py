@@ -55,22 +55,45 @@ class ActorCritic(nn.Module):
         return action, z.gather(-1, action.unsqueeze(-1)).squeeze(-1), value
 
     def policy_logits_numpy(self, obs: np.ndarray) -> np.ndarray:
-        """Policy logits for one feature vector, in NumPy (no value head, no autograd).
+        """Policy logits in NumPy (no value head, no autograd), for frozen opponents.
 
-        For frozen opponents: at batch size 1 this is about twice as fast as torch. Reads
-        the parameters in place (shared memory), so it follows in-place weight updates.
+        ``obs`` is one feature vector, or a ``(batch, features)`` stack: one matrix
+        product per layer for the whole batch, which also reads each weight matrix from
+        memory once instead of once per game. At batch size 1 this is about twice as fast
+        as torch. Reads the parameters in place, so it follows in-place weight updates.
         Matches the torch forward up to float32 rounding (~1e-6)."""
         x = obs
-        for layer in self.trunk:
-            if isinstance(layer, nn.Linear):
-                x = layer.weight.detach().numpy() @ x + layer.bias.detach().numpy()
-            elif isinstance(layer, nn.Tanh):
+        for kind, w, b in self._numpy_layers():
+            if kind == "tanh":
                 x = np.tanh(x)
-            else:
-                raise TypeError(f"no NumPy path for {type(layer).__name__}")
-        return self.policy.weight.detach().numpy() @ x + self.policy.bias.detach().numpy()
+                continue
+            x = w @ x + b if x.ndim == 1 else x @ w.T + b
+        return x
 
     def evaluate(self, obs: torch.Tensor, mask: torch.Tensor, actions: torch.Tensor):
         logits, value = self(obs)
         dist = masked_categorical(logits, mask)
         return dist.log_prob(actions), dist.entropy(), value
+
+    def _numpy_layers(self) -> list[tuple[str, np.ndarray, np.ndarray]]:
+        """NumPy views of the trunk and policy head, rebuilt if a parameter is reallocated."""
+        linears = [m for m in self.trunk if isinstance(m, nn.Linear)] + [self.policy]
+        key = tuple(t.data_ptr() for m in linears for t in (m.weight, m.bias))
+        cache = self.__dict__.get("_np_cache")
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        layers: list[tuple[str, np.ndarray, np.ndarray]] = []
+        for m in [*self.trunk, self.policy]:
+            if isinstance(m, nn.Linear):
+                layers.append(("linear", m.weight.detach().numpy(), m.bias.detach().numpy()))
+            elif isinstance(m, nn.Tanh):
+                layers.append(("tanh", np.empty(0), np.empty(0)))
+            else:
+                raise TypeError(f"no NumPy path for {type(m).__name__}")
+        self.__dict__["_np_cache"] = (key, layers)
+        return layers
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state.pop("_np_cache", None)  # views of this process's tensors; rebuilt on use
+        return state

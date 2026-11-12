@@ -95,6 +95,15 @@ class PPOConfig(_Strict):
     fast_win_turns: int = Field(200, ge=1)
     device: str = "cpu"
     num_envs: int = Field(1, ge=1)  # >1: one env + policy copy per worker process
+    # >1: each worker runs this many games at once and batches their network decisions
+    # (the learner's, and opponents' that share a model). Needs num_envs > 1.
+    games_per_worker: int = Field(1, ge=1)
+
+    @model_validator(mode="after")
+    def _check_games(self) -> PPOConfig:
+        if self.games_per_worker > 1 and self.num_envs < 2:
+            raise ValueError("games_per_worker > 1 needs num_envs > 1 (worker processes)")
+        return self
 
 
 class LeagueConfig(_Strict):

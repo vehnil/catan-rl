@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
-from catan.agents.learned.common.distributions import masked_logits
 from catan.agents.learned.ppo.model import ActorCritic
 from catan.player.base import Agent
 from catan.player.features import FEATURE_DIM, encode
@@ -32,15 +32,18 @@ class PPOAgent(Agent):
     def config(self) -> dict[str, Any]:
         return {"hidden": self.hidden, "deterministic": self.deterministic}
 
-    @torch.no_grad()
     def act(self, obs: Observation) -> int:
-        x = torch.as_tensor(encode(obs, self.belief)).unsqueeze(0)
-        logits, _ = self.model(x)
-        logits = masked_logits(logits, torch.as_tensor(obs.legal_mask).unsqueeze(0))
+        # NumPy forward and sampling: at batch size 1 torch's per-call overhead dominates.
+        # Same distribution (softmax over the legal actions' logits) as the torch path,
+        # but a different random stream, so games differ from runs before this change.
+        logits = self.model.policy_logits_numpy(encode(obs, self.belief))
+        legal = np.flatnonzero(obs.legal_mask)
+        z = logits[legal]
         if self.deterministic:
-            return int(logits.argmax())
-        g = torch.Generator().manual_seed(int(self.rng.integers(2**31)))
-        return int(torch.multinomial(torch.softmax(logits, -1), 1, generator=g))
+            return int(legal[int(np.argmax(z))])
+        cdf = np.cumsum(np.exp(z - z.max()))
+        i = int(np.searchsorted(cdf, self.rng.random() * cdf[-1], side="right"))
+        return int(legal[min(i, len(legal) - 1)])
 
     # ------------------------------------------------------------ persistence
 

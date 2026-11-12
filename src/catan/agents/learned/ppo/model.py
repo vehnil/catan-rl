@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 from torch import nn
 
-from catan.agents.learned.common.distributions import masked_categorical
+from catan.agents.learned.common.distributions import masked_categorical, masked_logits
 from catan.engine.actions import NUM_ACTIONS
 from catan.player.features import FEATURE_DIM
 
@@ -40,10 +41,34 @@ class ActorCritic(nn.Module):
 
     @torch.no_grad()
     def act(self, obs: torch.Tensor, mask: torch.Tensor, deterministic: bool = False):
+        # The same steps (and RNG draw) as Categorical(logits=...).sample() / .log_prob(),
+        # without building a distribution object, which costs more than the network here.
         logits, value = self(obs)
-        dist = masked_categorical(logits, mask)
-        action = dist.probs.argmax(-1) if deterministic else dist.sample()
-        return action, dist.log_prob(action), value
+        z = masked_logits(logits, mask)
+        z = z - z.logsumexp(-1, keepdim=True)
+        probs = torch.softmax(z, -1)
+        if deterministic:
+            action = probs.argmax(-1)
+        else:
+            action = torch.multinomial(probs.reshape(-1, probs.shape[-1]), 1, True).T
+            action = action.reshape(probs.shape[:-1])
+        return action, z.gather(-1, action.unsqueeze(-1)).squeeze(-1), value
+
+    def policy_logits_numpy(self, obs: np.ndarray) -> np.ndarray:
+        """Policy logits for one feature vector, in NumPy (no value head, no autograd).
+
+        For frozen opponents: at batch size 1 this is about twice as fast as torch. Reads
+        the parameters in place (shared memory), so it follows in-place weight updates.
+        Matches the torch forward up to float32 rounding (~1e-6)."""
+        x = obs
+        for layer in self.trunk:
+            if isinstance(layer, nn.Linear):
+                x = layer.weight.detach().numpy() @ x + layer.bias.detach().numpy()
+            elif isinstance(layer, nn.Tanh):
+                x = np.tanh(x)
+            else:
+                raise TypeError(f"no NumPy path for {type(layer).__name__}")
+        return self.policy.weight.detach().numpy() @ x + self.policy.bias.detach().numpy()
 
     def evaluate(self, obs: torch.Tensor, mask: torch.Tensor, actions: torch.Tensor):
         logits, value = self(obs)

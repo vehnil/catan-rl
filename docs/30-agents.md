@@ -106,7 +106,7 @@ Single-observer information-set MCTS (Cowling et al. 2012):
 ## Learned (`learned/`)
 
 ### `ppo[:hidden=[512,256],deterministic=false]`
-An actor-critic MLP over the 1,388 features. Illegal logits are masked to −1e9 before the softmax. It samples by default, or takes the argmax with `deterministic=true`. Saved as `weights.safetensors`; `export_onnx` for use outside Python. Training is covered in [training](50-training.md).
+An actor-critic MLP over the 1,388 features. As a player (`PPOAgent`), it runs the policy head in NumPy, which is about twice as fast as torch for one position. It then samples from the softmax over the legal actions' logits using the agent's own RNG, or takes the argmax with `deterministic=true`. Training (`ActorCritic.act`) uses torch, masking illegal logits to −1e9. Saved as `weights.safetensors`; `export_onnx` for use outside Python. Training is covered in [training](50-training.md).
 
 ## Cost per decision (rough)
 

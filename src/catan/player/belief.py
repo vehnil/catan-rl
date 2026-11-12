@@ -314,6 +314,16 @@ class BeliefTracker:
             return float(self.my_devs[DevCard.VICTORY_POINT])
         return float(self.dev_held[q] * self.dev_type_probs()[DevCard.VICTORY_POINT])
 
+    def expected_hidden_vps(self) -> list[float]:
+        """``expected_hidden_vp`` for every seat, computing the dev-type odds once."""
+        p_vp = self.dev_type_probs()[DevCard.VICTORY_POINT]
+        return [
+            float(self.my_devs[DevCard.VICTORY_POINT])
+            if q == self.seat
+            else float(self.dev_held[q] * p_vp)
+            for q in range(NUM_PLAYERS)
+        ]
+
     # ------------------------------------------------------------- determinization
 
     def determinize(

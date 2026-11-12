@@ -40,6 +40,12 @@ The first PPO round (500k steps vs random, then 1M vs greedy) beat random but ne
   - [x] `torch.set_num_threads(1)` in each worker.
   - [x] Vectorise greedy's `_best_offer` (`evaluate_hands`, bit-for-bit equal to `evaluate`): greedy games about 30% faster, identical moves.
   - [ ] Maybe: overlap the update with the next rollout's collection (workers idle about 15% of the time; costs one update of policy lag).
+  - [x] **Cheaper network players (Nov 2026):** v7's opponent mix makes about 80% of seats networks, so a learner step costs about 3.8 network decisions. Three changes made a v7 worker 1.23× faster (about 845 → 1,035 steps/s alone, 250 → 300 with six at once):
+    - Features fill one preallocated vector, with the board blocks cached per board. Bit-identical, checked against a frozen copy of the old encoder.
+    - The learner samples without building a `Categorical`. Bit-identical, same RNG stream.
+    - Opponents run the policy in NumPy and sample with the agent's NumPy RNG. Same distribution, different random stream.
+  - Scaling on this M1 is the bigger limit. Six workers at once give only about 2.3× one worker against random opponents, and about 1.75× with network opponents (each of those networks is about 2.8 MB, and many snapshots compete for the cache). The machine has 4 performance and 4 efficiency cores, plus background load. More cores (option D) beats further code work here.
+  - [ ] Maybe: batch network decisions across several games per worker (option B, about 1.5× estimated).
   - [ ] Maybe: lower `max_trade_proposals_per_turn` to cut trade-spam decisions (a rules change).
 - [ ] Generate 2–5k greedy-only games in parallel (tournament runner, replays saved).
 - [ ] Dataset: re-run the replays and record each seat's (features with its own beliefs, mask, action, final outcome). Four trajectories per game.

@@ -207,3 +207,86 @@ def test_evaluate_hands_matches_evaluate():
                     assert evaluate_hands(g.state, p, hands, w).tolist() == expected
                     checked += 1
     assert checked > 100
+
+
+def _ppo_positions(n=40):
+    import numpy as np
+
+    from catan.engine import Game, RulesConfig
+    from catan.player.observation import observe
+
+    g = Game(5, RulesConfig(max_turns_per_game=300))
+    rng = np.random.default_rng(5)
+    out = []
+    while not g.done and len(out) < n:
+        obs = observe(g.state, g.actor)
+        if obs.legal_mask.sum() > 1:
+            out.append(obs)
+        g.step(int(rng.choice(np.flatnonzero(obs.legal_mask))))
+    return out
+
+
+def test_ppo_numpy_policy_matches_torch():
+    import numpy as np
+    import torch
+
+    from catan.agents.learned.ppo.model import ActorCritic
+    from catan.player.features import encode
+
+    torch.manual_seed(0)
+    model = ActorCritic([512, 256])
+    with torch.no_grad():
+        for prm in model.policy.parameters():  # a sharper policy than the init's near-uniform one
+            prm.mul_(300)
+    for obs in _ppo_positions():
+        x = encode(obs)
+        with torch.no_grad():
+            ref = model(torch.as_tensor(x).unsqueeze(0))[0][0].numpy()
+        got = model.policy_logits_numpy(x)
+        assert np.allclose(got, ref, rtol=1e-5, atol=1e-5)
+        legal = np.flatnonzero(obs.legal_mask)
+        assert legal[np.argmax(got[legal])] == legal[np.argmax(ref[legal])]
+    with torch.no_grad():  # in-place updates (optimizer steps, load_state_dict) are followed
+        model.policy.bias.add_(1.0)
+    assert np.allclose(model.policy_logits_numpy(x), ref + 1.0, atol=1e-4)
+
+
+def test_ppo_agent_samples_softmax_over_legal_actions():
+    import numpy as np
+    import torch
+
+    from catan.agents.learned.ppo.agent import PPOAgent
+    from catan.agents.learned.ppo.model import ActorCritic
+    from catan.player.belief import BeliefTracker
+    from catan.player.features import encode
+
+    torch.manual_seed(1)
+    model = ActorCritic([64])
+    with torch.no_grad():
+        model.policy.weight.mul_(100)
+    obs = max(_ppo_positions(), key=lambda o: o.legal_mask.sum())
+    agent = PPOAgent([64], model=model)
+    agent.reset(obs.seat, np.random.default_rng(0))
+    agent.belief = BeliefTracker(obs.seat)
+    logits = model.policy_logits_numpy(encode(obs, agent.belief))
+    legal = np.flatnonzero(obs.legal_mask)
+    p = np.exp(logits[legal] - logits[legal].max())
+    p /= p.sum()
+    n = 20_000
+    counts = np.bincount([agent.act(obs) for _ in range(n)], minlength=len(obs.legal_mask))
+    assert counts[~obs.legal_mask].sum() == 0
+    assert np.abs(counts[legal] / n - p).max() < 0.015
+    agent.deterministic = True
+    assert agent.act(obs) == legal[np.argmax(p)]
+
+
+def test_ppo_agents_play_full_games_legally():
+    from catan.agents.learned.ppo.agent import PPOAgent
+    from catan.engine import RulesConfig
+    from catan.sim.runner import play_game
+
+    for seed in range(3):  # play_game raises on any illegal action
+        rec = play_game(
+            [PPOAgent([32]) for _ in range(4)], seed, RulesConfig(max_turns_per_game=150)
+        )
+        assert rec.steps > 0

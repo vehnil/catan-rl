@@ -62,6 +62,17 @@ class TournamentConfig(_Strict):
         return self
 
 
+class ReferenceConfig(_Strict):
+    """A fixed set of opponents that candidates are rated against (``catan rate``)."""
+
+    name: str = "reference"
+    agents: list[str]
+    calibration_games: int = Field(1400, ge=1)  # round-robin among the references, once
+    gauntlet_games: int = Field(400, ge=1)  # per candidate
+    seed: int = 9000
+    rules: RulesModel = RulesModel()
+
+
 class PPOConfig(_Strict):
     total_steps: int = Field(200_000, ge=1)
     rollout_steps: int = Field(2048, ge=64)

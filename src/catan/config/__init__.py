@@ -1,6 +1,7 @@
 from catan.config.models import (
     LeagueConfig,
     PPOConfig,
+    ReferenceConfig,
     RulesModel,
     TournamentConfig,
     TrainConfig,
@@ -10,6 +11,7 @@ from catan.config.models import (
 __all__ = [
     "LeagueConfig",
     "PPOConfig",
+    "ReferenceConfig",
     "RulesModel",
     "TournamentConfig",
     "TrainConfig",

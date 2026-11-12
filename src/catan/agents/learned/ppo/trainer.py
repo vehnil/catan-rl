@@ -47,12 +47,14 @@ def evaluate_policy(
     return _eval_summary(results)
 
 
-def _eval_summary(results: list[tuple[int, bool, int, int]]) -> dict[str, float]:
-    wins = sum(won for _, won, _, _ in results)
+def _eval_summary(results: list[tuple[int, bool, int, int, int, int]]) -> dict[str, float]:
+    wins = sum(r[1] for r in results)
     return {
         "eval_win_rate": wins / len(results),
-        "eval_mean_vp": float(np.mean([vp for _, _, vp, _ in results])),
-        "eval_mean_turns": float(np.mean([t for _, _, _, t in results])),
+        "eval_mean_vp": float(np.mean([r[2] for r in results])),
+        "eval_mean_turns": float(np.mean([r[3] for r in results])),
+        "eval_mean_rank": float(np.mean([r[4] for r in results])),
+        "eval_vp_margin": float(np.mean([r[5] for r in results])),
     }
 
 

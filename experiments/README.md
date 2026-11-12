@@ -15,6 +15,24 @@ What we've learned across versions, and hypotheses for training better: [notes/f
 
 Config fields and defaults are in `src/catan/config/models.py`. Unknown keys are rejected. See [docs/50-training.md](../docs/50-training.md) for the training loop.
 
+## Evaluation protocol (from v7 on)
+
+v2–v6 drew conclusions from 60–200 games and one to four seeds, which is often within the noise ([findings](../notes/findings.md) 12). From v7 on, every experiment follows these rules:
+
+1. **Write down the comparison before running:** what is compared with what, the primary metric, and what counts as better.
+2. **Run at least three seeds per arm,** and compare arms with `catan compare`. It reports the mean over seeds and a 95% t-interval. If the intervals overlap, the result is "no detectable difference".
+3. **Primary metrics:**
+   - **VP margin over the best opponent, and mean rank.** These carry information in every game, unlike wins.
+   - **The reference rating** (`catan rate`, set in [reference.yaml](reference.yaml)).
+   - Win rate is secondary.
+4. **Headline lineup: 3× greedy.** The 2 random + greedy lineup is a secondary, beginner-level check, since random players inflate everyone's VP.
+5. **Game counts:**
+   - 400 games per final evaluation.
+   - 200 per `catan curve` checkpoint.
+   - A 400-game reference rating at each 1M-step checkpoint for long runs.
+6. **Sampled play is the main result,** since that's the policy as trained. `--deterministic` (argmax) is a secondary view.
+7. **Check training health** with `catan health <run>` before reading any results.
+
 ## Chaining stages
 
 `init_policy` warm-starts from an earlier policy. It accepts a policy id, an exact policy name, or a training config's `name`. A config name picks the **newest** policy trained by that config, because trained policies are named `<config name>-<run id>`. So stage *n* can say `init_policy: <stage n−1 name>`, and it picks up whatever that stage last produced. Re-running a stage replaces what the next stage starts from.
@@ -276,3 +294,4 @@ Checkpoints (200k / 400k / 600k / 800k): s1 `7cbee1e5c5` `a79e3e27cf` `426387e95
 - **Mild late specialisation in s1 and s3:** their held-out PPO score flattens after about 400k while the peers score keeps rising. s2 and s4 kept improving on both.
 - **No forgetting:** all four still beat 3× random 97–100% of the time.
 - **Best results against greedy so far.** Every learner gained 0.24–0.71 VP over its stage-1 self, and all four beat the previous best (v5 A, 4.79 VP and 2.5% wins). Unlike v4, self-play here helped against greedy, even though greedy never appeared in training. The differences from v4 are a population of peers instead of one frozen copy, and about 25% random seats.
+

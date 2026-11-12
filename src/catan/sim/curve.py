@@ -16,6 +16,7 @@ from typing import Any
 
 from catan.engine.state import RulesConfig
 from catan.sim.artifacts import read_manifest
+from catan.sim.ratings import wilson_interval
 from catan.sim.runner import run_matchups
 from catan.sim.store import Store
 from catan.sim.tournament import schedule_fixed
@@ -62,33 +63,41 @@ def evaluate_curve(
     workers: int = 8,
     data_dir: str | Path = "data",
     progress: Any = None,
+    deterministic: bool = False,
 ) -> list[dict[str, Any]]:
-    """One row per (checkpoint, lineup): win rate, mean VP and mean turns over ``games``."""
+    """One row per (checkpoint, lineup) over ``games``: win rate (with a 95% interval),
+    mean rank, mean VP margin over the best opponent, mean VP and mean turns.
+    ``deterministic`` plays each checkpoint's most likely action (``policy:<id>#argmax``)."""
     for name, lineup in lineups.items():
         if len(lineup) != 3:
             raise ValueError(f"lineup {name!r} needs 3 opponents, got {lineup}")
     matchups, owner = [], {}
+    suffix = "#argmax" if deterministic else ""
     for c in checkpoints:
-        cand = f"policy:{c.policy_id}"
+        cand = f"policy:{c.policy_id}{suffix}"
         for name, lineup in lineups.items():
             if cand in lineup:
                 raise ValueError(f"{cand} also appears in lineup {name!r}")
             for m in schedule_fixed([cand, *lineup], games, seed):
                 matchups.append(m)
                 owner[(m.specs, m.seed)] = (c, name)
-    stats: dict[tuple[str, str], list[tuple[bool, int, int]]] = {}
+    stats: dict[tuple[str, str], list[tuple[bool, int, int, int, int]]] = {}
     for i, rec in enumerate(
         run_matchups(matchups, rules, workers=workers, data_dir=str(data_dir), record_actions=False)
     ):
         c, name = owner[(tuple(rec.agents), rec.seed)]
-        seat = rec.agents.index(f"policy:{c.policy_id}")
-        stats.setdefault((c.label, name), []).append((rec.winner == seat, rec.vp[seat], rec.turns))
+        seat = rec.agents.index(f"policy:{c.policy_id}{suffix}")
+        margin = rec.vp[seat] - max(v for s, v in enumerate(rec.vp) if s != seat)
+        stats.setdefault((c.label, name), []).append(
+            (rec.winner == seat, rec.vp[seat], rec.turns, rec.ranks[seat], margin)
+        )
         if progress is not None:
             progress(i + 1, len(matchups))
     rows = []
     for c in checkpoints:
         for name in lineups:
             s = stats[(c.label, name)]
+            wins = sum(r[0] for r in s)
             rows.append(
                 {
                     "label": c.label,
@@ -96,9 +105,12 @@ def evaluate_curve(
                     "policy_id": c.policy_id,
                     "lineup": name,
                     "games": len(s),
-                    "win_rate": sum(w for w, _, _ in s) / len(s),
-                    "mean_vp": sum(v for _, v, _ in s) / len(s),
-                    "mean_turns": sum(t for _, _, t in s) / len(s),
+                    "win_rate": wins / len(s),
+                    "win_ci95": wilson_interval(wins, len(s)),
+                    "mean_rank": sum(r[3] for r in s) / len(s),
+                    "vp_margin": sum(r[4] for r in s) / len(s),
+                    "mean_vp": sum(r[1] for r in s) / len(s),
+                    "mean_turns": sum(r[2] for r in s) / len(s),
                 }
             )
     return rows

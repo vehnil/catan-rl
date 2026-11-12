@@ -414,6 +414,18 @@ def test_checkpoints_and_curve(tmp_path):
     lineups = {"rand": ["random"] * 3, "mixed": ["random", "random", "greedy"]}
     rows = evaluate_curve(ckpts, lineups, games=4, workers=1, rules=QUICK, data_dir=tmp_path)
     assert len(rows) == len(ckpts) * 2 and all(r["games"] == 4 for r in rows)
+    for r in rows:
+        assert 1 <= r["mean_rank"] <= 4 and r["win_ci95"][0] <= r["win_rate"] <= r["win_ci95"][1]
+    argmax = evaluate_curve(
+        ckpts[:1],
+        {"rand": ["random"] * 3},
+        games=2,
+        workers=1,
+        rules=QUICK,
+        data_dir=tmp_path,
+        deterministic=True,
+    )
+    assert argmax[0]["games"] == 2
 
 
 def test_explained_variance_of_rollout():
@@ -546,3 +558,79 @@ def test_resume_parallel_keeps_snapshot_pool(tmp_path):
         cfg = _resume_cfg(tmp_path / "none", 64).model_copy(update={"checkpoint_every": None})
         run = train(cfg, log=quiet)["run_id"]
         train(cfg, log=quiet, resume=run)
+
+
+def test_policy_argmax_spec(tmp_path):
+    from catan.agents.learned.ppo.agent import PPOAgent
+
+    with Store(tmp_path / "catan.db") as store:
+        manifest, _ = save_policy(PPOAgent([32]), tmp_path, name="p", store=store)
+    assert not make_agent(f"policy:{manifest['id']}", tmp_path).deterministic
+    assert make_agent(f"policy:{manifest['id']}#argmax", tmp_path).deterministic
+    with pytest.raises(ValueError):
+        make_agent(f"policy:{manifest['id']}#greedy", tmp_path)
+
+
+def test_rate_against_fixed_moves_only_the_candidate():
+    from catan.sim.ratings import DEFAULT, rate_against_fixed
+    from catan.sim.runner import GameRecord
+
+    fixed = {"a": {"mu": 30.0, "sigma": 2.0}, "b": {"mu": 20.0, "sigma": 2.0}}
+    snapshot = json.dumps(fixed)
+
+    def game(ranks):
+        return GameRecord(
+            0, {}, ["cand", "a", "b", "b"], 0, 50, False, [10, 5, 4, 3], ranks, 1, 0.0
+        )
+
+    strong = rate_against_fixed(fixed, "cand", [game([1, 2, 3, 4])] * 30)
+    weak = rate_against_fixed(fixed, "cand", [game([4, 1, 2, 3])] * 30)
+    assert strong["mu"] > 30 > 20 > weak["mu"] and strong["games"] == 30
+    assert strong["sigma"] < DEFAULT["sigma"]
+    assert json.dumps(fixed) == snapshot  # references untouched
+
+
+@pytest.mark.slow
+def test_reference_calibrate_and_rate(tmp_path):
+    from catan.config import ReferenceConfig
+    from catan.sim import reference
+
+    cfg = ReferenceConfig(
+        agents=["random", "greedy"],
+        calibration_games=8,
+        gauntlet_games=8,
+        rules={"max_turns_per_game": 60},
+    )
+    with pytest.raises(FileNotFoundError):
+        reference.rate("greedy:epsilon=0.5", cfg, workers=1, data_dir=tmp_path)
+    cal = reference.calibrate(cfg, workers=1, data_dir=tmp_path)
+    assert set(cal["ratings"]) == {"random", "greedy"}
+    out = reference.rate("greedy:epsilon=0.5", cfg, workers=1, data_dir=tmp_path)
+    assert out["games"] == 8 and 1 <= out["mean_rank"] <= 4
+    assert out["conservative"] == pytest.approx(out["mu"] - 3 * out["sigma"])
+    assert reference.load_reference(cfg, tmp_path)["ratings"] == cal["ratings"]  # unchanged
+    with pytest.raises(ValueError):
+        reference.rate("greedy", cfg, workers=1, data_dir=tmp_path)  # a reference itself
+
+
+def test_compare_groups_mean_and_interval():
+    from catan.sim.compare import group_summary, mean_ci
+
+    mean, lo, hi = mean_ci([1.0, 2.0, 3.0])
+    assert mean == 2.0 and lo == pytest.approx(2 - 4.303 / 3**0.5) and hi > 3
+    assert mean_ci([5.0])[0] == 5.0 and mean_ci([5.0])[1] != mean_ci([5.0])[1]  # no interval
+    rows = [
+        {
+            "policy_id": pid,
+            "lineup": "g",
+            "vp_margin": m,
+            "mean_rank": 2.0,
+            "win_rate": 0.1,
+            "mean_vp": 5.0,
+        }
+        for pid, m in [("a", -1.0), ("b", -2.0), ("c", 0.5)]
+    ]
+    out = group_summary(rows, {"x": ["a", "b"], "y": ["c"]})
+    assert [(r["group"], r["n"]) for r in out] == [("x", 2), ("y", 1)]
+    assert out[0]["vp_margin"][0] == -1.5 and out[0]["vp_margin_each"] == [-1.0, -2.0]
+

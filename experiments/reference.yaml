@@ -1,0 +1,15 @@
+# Fixed reference opponents for `catan rate` (see "Evaluation protocol" in README.md).
+# Calibrate once: `catan rate --calibrate`. Changing `agents` needs a new `name`, so
+# ratings from different reference sets are never mixed.
+name: reference_v1
+agents:
+  - random
+  - greedy:epsilon=0.8
+  - greedy:epsilon=0.5
+  - greedy:epsilon=0.2
+  - greedy
+  - policy:cb4614a1f1   # v6 stage 2 s4: random -> peers (best yardstick at the time)
+  - policy:9413f93f8b   # v4 PPO v2: random -> self-play against frozen v1
+calibration_games: 1400  # 35 lineups x 4 seatings x 10
+gauntlet_games: 400
+seed: 9000

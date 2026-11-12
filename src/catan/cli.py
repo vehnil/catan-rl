@@ -251,6 +251,30 @@ def runs(limit: int = 20, data_dir: DataOpt = "data") -> None:
         typer.echo(_table(store.runs(limit), ["id", "kind", "name", "status", "created_at"]))
 
 
+def _pin(spec: str, data_dir: str) -> str:
+    """``policy:<ref>`` -> ``policy:<id>``, so reports name exact policies."""
+    if not spec.startswith("policy:"):
+        return spec
+    from catan.sim.artifacts import read_manifest, resolve_policy_path
+
+    ref, hash_, mode = spec.removeprefix("policy:").partition("#")
+    return f"policy:{read_manifest(resolve_policy_path(ref, data_dir))['id']}{hash_}{mode}"
+
+
+def _lineups(vs: list[str], data_dir: str) -> dict[str, list[str]]:
+    lineups: dict[str, list[str]] = {}
+    for item in vs:
+        name, sep, specs = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--vs needs name=spec,spec,spec, got {item!r}")
+        lineups[name.strip()] = [_pin(s.strip(), data_dir) for s in specs.split(",")]
+    return lineups
+
+
+def _cell(r: dict) -> str:
+    return f"{r['vp_margin']:+.2f}m {r['mean_rank']:.2f}r {r['win_rate']:.0%}"
+
+
 @app.command()
 def curve(
     run: Annotated[str, typer.Argument(help="Run id, or a training config name (newest run).")],
@@ -258,31 +282,24 @@ def curve(
         list[str],
         typer.Option("--vs", help="Lineup to play against, as name=spec,spec,spec. Repeatable."),
     ],
-    games: int = 100,
+    games: int = 200,
     seed: int = 0,
     workers: int = 8,
+    deterministic: Annotated[
+        bool, typer.Option(help="Play each policy's most likely action (#argmax).")
+    ] = False,
     out: Annotated[
         Path | None, typer.Option("--out", "-o", help="Also write rows as JSON.")
     ] = None,
     data_dir: DataOpt = "data",
 ) -> None:
-    """Evaluate a run's starting policy, checkpoints and final policy against fixed lineups."""
-    from catan.sim.artifacts import read_manifest, resolve_policy_path
+    """Evaluate a run's starting policy, checkpoints and final policy against fixed lineups.
+
+    Cells show VP margin over the best opponent (m), mean rank (r) and win rate."""
     from catan.sim.curve import evaluate_curve, run_checkpoints
     from catan.sim.store import Store
 
-    lineups: dict[str, list[str]] = {}
-    for item in vs:
-        name, sep, specs = item.partition("=")
-        if not sep:
-            raise typer.BadParameter(f"--vs needs name=spec,spec,spec, got {item!r}")
-        pinned = []
-        for spec in (s.strip() for s in specs.split(",")):
-            if spec.startswith("policy:"):  # pin refs so the report names exact policies
-                pid = read_manifest(resolve_policy_path(spec.removeprefix("policy:"), data_dir))
-                spec = f"policy:{pid['id']}"
-            pinned.append(spec)
-        lineups[name.strip()] = pinned
+    lineups = _lineups(vs, data_dir)
     with Store(Path(data_dir) / "catan.db") as store:
         run_id, checkpoints = run_checkpoints(store, run)
     typer.echo(
@@ -290,17 +307,108 @@ def curve(
     )
     for name, lineup in lineups.items():
         typer.echo(f"  {name}: {', '.join(lineup)}")
-    rows = evaluate_curve(checkpoints, lineups, games, seed, None, workers, data_dir)
+    rows = evaluate_curve(
+        checkpoints, lineups, games, seed, None, workers, data_dir, deterministic=deterministic
+    )
     table = []
     for c in checkpoints:
         row: dict[str, object] = {"policy": c.label, "id": c.policy_id}
         for r in rows:
             if r["label"] == c.label:
-                row[r["lineup"]] = f"{r['win_rate']:.0%} {r['mean_vp']:.2f}vp"
+                row[r["lineup"]] = _cell(r)
         table.append(row)
     typer.echo(_table(table, ["policy", "id", *lineups]))
     if out is not None:
         out.write_text(json.dumps({"run_id": run_id, "lineups": lineups, "rows": rows}, indent=2))
+        typer.echo(f"wrote {out}")
+
+
+@app.command()
+def rate(
+    candidates: Annotated[
+        list[str] | None, typer.Argument(help="Agent specs to rate, e.g. policy:<id>.")
+    ] = None,
+    reference: Path = Path("experiments/reference.yaml"),
+    calibrate: Annotated[
+        bool, typer.Option("--calibrate", help="(Re)fix the reference ratings first.")
+    ] = False,
+    games: Annotated[int | None, typer.Option(help="Gauntlet games per candidate.")] = None,
+    workers: int = 8,
+    data_dir: DataOpt = "data",
+) -> None:
+    """Rate agents against a fixed reference set (only the candidate's rating moves)."""
+    from catan.config import ReferenceConfig, load_config
+    from catan.sim import reference as ref
+
+    cfg = load_config(reference, ReferenceConfig)
+    if calibrate:
+        cal = ref.calibrate(cfg, workers, data_dir, progress=lambda d, t: _progress(d, t, None))
+        rows = [{"agent": k, **v} for k, v in cal["ratings"].items()]
+        rows.sort(key=lambda r: -r["mu"])
+        typer.echo(f"calibrated {cfg.name} over {cal['games']} games")
+        typer.echo(_table(rows, ["agent", "mu", "sigma", "games"]))
+    rows = []
+    for spec in candidates or []:
+        rows.append(
+            ref.rate(
+                _pin(spec, data_dir), cfg, games, workers, data_dir,
+                progress=lambda d, t: _progress(d, t, None),
+            )
+        )
+    if rows:
+        cols = ["candidate", "mu", "sigma", "conservative", "games", "vp_margin", "mean_rank"]
+        typer.echo(_table(rows, [*cols, "win_rate"]))
+
+
+@app.command()
+def compare(
+    group: Annotated[
+        list[str],
+        typer.Option("--group", help="name=policy,policy,... (e.g. one per seed). Repeatable."),
+    ],
+    vs: Annotated[
+        list[str],
+        typer.Option("--vs", help="Lineup to play against, as name=spec,spec,spec. Repeatable."),
+    ],
+    games: int = 400,
+    seed: int = 0,
+    workers: int = 8,
+    deterministic: bool = False,
+    out: Annotated[Path | None, typer.Option("--out", "-o")] = None,
+    data_dir: DataOpt = "data",
+) -> None:
+    """Compare groups of policies on the same games: mean and 95% t-interval per group."""
+    from catan.sim.compare import METRICS, group_summary
+    from catan.sim.curve import Checkpoint, evaluate_curve
+
+    groups: dict[str, list[str]] = {}
+    for item in group:
+        name, sep, members = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--group needs name=policy,policy, got {item!r}")
+        groups[name.strip()] = [
+            _pin(f"policy:{i.strip().removeprefix('policy:')}", data_dir).removeprefix("policy:")
+            for i in members.split(",")
+        ]
+    lineups = _lineups(vs, data_dir)
+    ids = list(dict.fromkeys(i for g in groups.values() for i in g))
+    checkpoints = [Checkpoint(i, i, 0) for i in ids]
+    rows = evaluate_curve(
+        checkpoints, lineups, games, seed, None, workers, data_dir, deterministic=deterministic
+    )
+    summary = group_summary(rows, groups)
+
+    def fmt(t: tuple[float, float, float]) -> str:
+        mean, lo, hi = t
+        return f"{mean:.3f}" if lo != lo else f"{mean:.3f} [{lo:.3f}, {hi:.3f}]"
+
+    table = [
+        {"group": r["group"], "lineup": r["lineup"], "n": r["n"], **{m: fmt(r[m]) for m in METRICS}}
+        for r in summary
+    ]
+    typer.echo(_table(table, ["group", "lineup", "n", *METRICS]))
+    if out is not None:
+        out.write_text(json.dumps({"groups": groups, "lineups": lineups, "rows": rows}, indent=2))
         typer.echo(f"wrote {out}")
 
 

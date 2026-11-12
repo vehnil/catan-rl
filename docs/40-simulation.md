@@ -92,7 +92,7 @@ data/policies/<id>/
 - `resolve_policy_path(ref)` accepts a path, an id or a name.
 - `export_policy(path, "json" | "onnx")`. JSON dumps the manifest plus weights as nested lists (only sensible for small networks). ONNX needs `uv add onnx onnxscript`.
 
-Any stored policy can play in a tournament as `policy:<id>`.
+Any stored policy can play in a tournament as `policy:<id>`. Add `#argmax` (`policy:<id>#argmax`) to make it always play its most likely action instead of sampling.
 
 ## CLI (`cli.py`)
 
@@ -105,7 +105,9 @@ Run with `uv run --no-editable catan …`.
 | `catan sim -a … --games 200 --workers 8` | Fixed-lineup tournament |
 | `catan tournament experiments/<version>/x.yaml` | Tournament from a config |
 | `catan train experiments/v1_examples/ppo_small.yaml` | PPO training |
-| `catan curve <run> --vs name=a,b,c [--vs …]` | Evaluate a run's starting policy, checkpoints and final policy against fixed lineups (same games for each), to spot overfitting |
+| `catan curve <run> --vs name=a,b,c [--vs …] [--deterministic]` | Evaluate a run's starting policy, checkpoints and final policy against fixed lineups (same games for each), to spot overfitting. Cells show VP margin over the best opponent, mean rank and win rate |
+| `catan rate [policy:<id> …] [--calibrate] [--reference experiments/reference.yaml]` | Rate agents against a fixed reference set. `--calibrate` runs the references' round-robin once to fix their ratings; after that each candidate plays a gauntlet and only its own rating moves, so all candidates share one scale |
+| `catan compare --group name=id,id,id [--group …] --vs name=a,b,c [--vs …]` | Compare groups of policies (e.g. one per seed) on the same games: each group's mean VP margin, rank, win rate and VP with a 95% t-interval over its members |
 | `catan health <run> [--windows N]` | Summarize a training run's PPO health metrics (entropy, explained variance, KL, clip fraction, value loss, grad norm) over windows, flagging warning signs |
 | `catan replay <file> [--step] [--seat N]` | Re-simulate, render, verify |
 | `catan view [file] [--port] [--no-open]` | Browser viewer for stored games |

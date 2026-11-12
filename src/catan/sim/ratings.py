@@ -42,6 +42,26 @@ def update_ratings(
     return out
 
 
+def rate_against_fixed(
+    fixed: dict[str, dict[str, float]], candidate: str, records: Iterable[GameRecord]
+) -> dict[str, float]:
+    """Rate ``candidate`` from its games against opponents whose ratings stay fixed.
+
+    Only the candidate's rating moves, so ratings from different candidates rated
+    against the same reference set are on one scale and comparable.
+    """
+    r = dict(DEFAULT)
+    for rec in records:
+        teams = []
+        for spec in rec.agents:
+            ref = r if spec == candidate else fixed[spec]
+            teams.append([_MODEL.rating(mu=ref["mu"], sigma=ref["sigma"], name=spec)])
+        new = _MODEL.rate(teams, ranks=list(rec.ranks))
+        seat = rec.agents.index(candidate)
+        r = {"mu": new[seat][0].mu, "sigma": new[seat][0].sigma, "games": r["games"] + 1}
+    return r
+
+
 def wilson_interval(wins: int, games: int, z: float = 1.96) -> tuple[float, float]:
     """95% Wilson score interval for a win rate."""
     if games == 0:

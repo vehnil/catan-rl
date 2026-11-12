@@ -6,6 +6,7 @@ All agents live in `src/catan/agents/` and are built from **spec strings** (`reg
 name                         greedy
 name:key=value,key=value     ismcts:iterations=300,max_depth=6
 policy:<id | name | path>    policy:08ceaf5856
+policy:<ref>#argmax          policy:08ceaf5856#argmax   (always the most likely action)
 ```
 
 Values are parsed as int, float, bool or string. `catan agents` lists the names. In CLI `--agents` lists, separate specs with `;` when they contain commas.

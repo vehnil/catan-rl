@@ -5,6 +5,7 @@ Spec grammar::
     name                      e.g. "greedy"
     name:key=value,key=value  e.g. "ismcts:iterations=300,determinizations=4"
     policy:<id-or-path>       a stored policy (see ``catan.sim.artifacts``)
+    policy:<ref>#argmax       the same policy, always playing its most likely action
 
 Values are parsed as int, float, bool (true/false) or left as strings.
 """
@@ -80,7 +81,13 @@ def make_agent(spec: str, data_dir: str | Path = "data") -> Agent:
     if name == "policy":
         from catan.sim.artifacts import load_policy, resolve_policy_path
 
-        return load_policy(resolve_policy_path(kwargs["ref"], data_dir))
+        ref, _, mode = kwargs["ref"].partition("#")
+        policy = load_policy(resolve_policy_path(ref, data_dir))
+        if mode == "argmax" and hasattr(policy, "deterministic"):
+            policy.deterministic = True
+        elif mode:
+            raise ValueError(f"unknown policy mode {mode!r} in {spec!r} (only #argmax)")
+        return policy
     agent = agent_class(name)(**kwargs)
     agent.spec = spec  # type: ignore[attr-defined]
     return agent

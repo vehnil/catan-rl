@@ -50,10 +50,10 @@ def eval_games(
     rules: RulesConfig,
     seed: int,
     data_dir: str | Path = "data",
-) -> list[tuple[int, bool, int, int]]:
+) -> list[tuple[int, bool, int, int, int, int]]:
     """Play the given game numbers; the learner sits in seat ``g % 4``.
 
-    Returns (g, won, vp, turns) per game.
+    Returns (g, won, vp, turns, rank, vp margin over the best opponent) per game.
     """
     out = []
     for g in games:
@@ -61,7 +61,8 @@ def eval_games(
         lineup = [make_agent(s, data_dir) for s in opponents]
         lineup.insert(seat, PPOAgent(hidden, model=model))
         rec = play_game(lineup, seed + g, rules)
-        out.append((g, rec.winner == seat, rec.vp[seat], rec.turns))
+        margin = rec.vp[seat] - max(v for s, v in enumerate(rec.vp) if s != seat)
+        out.append((g, rec.winner == seat, rec.vp[seat], rec.turns, rec.ranks[seat], margin))
     return out
 
 
@@ -241,7 +242,7 @@ class RolloutWorkers:
         games: int,
         rules: RulesConfig,
         seed: int,
-    ) -> list[tuple[int, bool, int, int]]:
+    ) -> list[tuple[int, bool, int, int, int, int]]:
         state = _state(model)
         for i, c in enumerate(self.conns):
             c.send(("eval", state, hidden, opponents, list(range(i, games, self.n)), rules, seed))

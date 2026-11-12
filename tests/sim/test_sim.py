@@ -475,3 +475,74 @@ def test_health_summary_flags_warning_signs():
     assert windows[0]["warnings"] == []
     assert any("explained variance" in m for m in windows[1]["warnings"])
     assert windows[0]["clip_frac"] is None  # older runs lack some columns
+
+
+def _resume_cfg(tmp_path, total_steps, **ppo):
+    return TrainConfig.model_validate(
+        {
+            "name": "r",
+            "data_dir": str(tmp_path),
+            "checkpoint_every": 64,
+            "rules": {"max_turns_per_game": 30},
+            "ppo": {
+                "total_steps": total_steps,
+                "rollout_steps": 64,
+                "minibatch": 32,
+                "epochs": 1,
+                "hidden": [32],
+                **ppo,
+            },
+            "league": {"fixed_opponents": ["random"], "snapshot_every": 64, "max_snapshots": 2},
+            "eval_every": 100,
+            "eval_games": 1,
+        }
+    )
+
+
+def _rows(tmp_path, run_id):
+    return [json.loads(line) for line in (tmp_path / "runs" / run_id / "metrics.jsonl").open()]
+
+
+@pytest.mark.slow
+def test_resume_single_env_matches_uninterrupted_run(tmp_path):
+    import torch
+
+    from catan.agents.learned.ppo.trainer import train
+
+    quiet = lambda *_: None  # noqa: E731
+    straight = train(_resume_cfg(tmp_path / "a", 256), log=quiet)
+    first = train(_resume_cfg(tmp_path / "b", 128), log=quiet)  # "stopped" at 128
+    resumed = train(_resume_cfg(tmp_path / "b", 256), log=quiet, resume=first["run_id"])
+    assert resumed["run_id"] == first["run_id"]
+    a = load_policy(straight["policy_path"]).model.state_dict()
+    b = load_policy(resumed["policy_path"]).model.state_dict()
+    assert all(torch.equal(a[k], b[k]) for k in a)
+    drop = {"sps"}
+    rows_a = [
+        {k: v for k, v in r.items() if k not in drop}
+        for r in _rows(tmp_path / "a", straight["run_id"])
+    ]
+    rows_b = [
+        {k: v for k, v in r.items() if k not in drop}
+        for r in _rows(tmp_path / "b", first["run_id"])
+    ]
+    assert rows_a == rows_b  # one row per update, none duplicated across the resume
+    with Store(tmp_path / "b" / "catan.db") as store:
+        assert store.find_run(first["run_id"])["status"] == "done"
+
+
+@pytest.mark.slow
+def test_resume_parallel_keeps_snapshot_pool(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+
+    quiet = lambda *_: None  # noqa: E731
+    first = train(_resume_cfg(tmp_path, 128, num_envs=2), log=quiet)
+    resumed = train(_resume_cfg(tmp_path, 256, num_envs=2), log=quiet, resume="r")
+    rows = _rows(tmp_path, first["run_id"])
+    assert resumed["run_id"] == first["run_id"]
+    assert rows[-1]["steps"] >= 256 and rows[-1]["snapshots"] == 2
+    assert [r["steps"] for r in rows] == sorted({r["steps"] for r in rows})
+    with pytest.raises(FileNotFoundError):
+        cfg = _resume_cfg(tmp_path / "none", 64).model_copy(update={"checkpoint_every": None})
+        run = train(cfg, log=quiet)["run_id"]
+        train(cfg, log=quiet, resume=run)

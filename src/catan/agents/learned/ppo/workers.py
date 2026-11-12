@@ -177,7 +177,7 @@ class RolloutWorkers:
     ) -> None:
         self.n = n
         self.max_snapshots = league_cfg.max_snapshots
-        self.snapshots = 0
+        self.snapshot_states: list[dict[str, torch.Tensor]] = []  # kept for resuming
         ctx = mp.get_context("spawn")
         self.conns: list[Connection] = []
         self.procs = []
@@ -222,9 +222,16 @@ class RolloutWorkers:
                     busy.discard(conn)
         return out
 
+    @property
+    def snapshots(self) -> int:
+        return len(self.snapshot_states)
+
     def add_snapshot(self, model: ActorCritic) -> None:
-        self._broadcast("snapshot", _state(model))
-        self.snapshots = min(self.snapshots + 1, self.max_snapshots)
+        self.add_snapshot_state(_state(model))
+
+    def add_snapshot_state(self, state: dict[str, torch.Tensor]) -> None:
+        self._broadcast("snapshot", state)
+        self.snapshot_states = [*self.snapshot_states, state][-self.max_snapshots :]
 
     def evaluate(
         self,

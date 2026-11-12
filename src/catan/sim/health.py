@@ -37,10 +37,7 @@ WARNINGS = [
 
 def run_metrics(store: Store, run: str, data_dir: str | Path) -> tuple[str, list[dict[str, Any]]]:
     """``run`` is a run id or a config name (newest run with that name)."""
-    runs = [r for r in store.runs(limit=10_000) if run in (r["id"], r["name"])]
-    if not runs:
-        raise KeyError(f"no run {run!r}")
-    run_id = runs[0]["id"]
+    run_id = store.find_run(run)["id"]
     path = Path(data_dir) / "runs" / run_id / "metrics.jsonl"
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     return run_id, rows

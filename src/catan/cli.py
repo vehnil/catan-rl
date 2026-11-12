@@ -142,12 +142,18 @@ def tournament(config: Path) -> None:
 
 
 @app.command()
-def train(config: Path) -> None:
+def train(
+    config: Path,
+    resume: Annotated[
+        str | None,
+        typer.Option(help="Continue this stopped run (id or config name) from its last state."),
+    ] = None,
+) -> None:
     """Train a PPO agent described by a YAML file."""
     from catan.agents.learned.ppo.trainer import train as run_train
     from catan.config import TrainConfig, load_config
 
-    result = run_train(load_config(config, TrainConfig), log=typer.echo)
+    result = run_train(load_config(config, TrainConfig), log=typer.echo, resume=resume)
     typer.echo(json.dumps(result, indent=2, default=str))
 
 

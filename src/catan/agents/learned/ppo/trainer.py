@@ -2,7 +2,8 @@
 
 Writes per-update metrics to ``data/runs/<run_id>/metrics.jsonl``, registers
 the run and the final policy in the SQLite store, and saves the policy under
-``data/policies/<id>``.
+``data/policies/<id>``. With ``checkpoint_every``, the full training state is
+also saved to ``data/runs/<run_id>/train_state.pt`` so a stopped run can resume.
 """
 
 from __future__ import annotations
@@ -130,7 +131,18 @@ def _rollout_stats(buf: RolloutBuffer) -> dict[str, float]:
     return {"explained_var": ev, "value_mean": float(values.mean())}
 
 
-def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]:
+def _save_state(path: Path, state: dict[str, Any]) -> None:
+    tmp = path.with_suffix(".tmp")
+    torch.save(state, tmp)
+    tmp.replace(path)  # atomic: a crash mid-write leaves the previous state intact
+
+
+def train(
+    cfg: TrainConfig, log: Callable[[str], Any] = print, resume: str | None = None
+) -> dict[str, Any]:
+    """Train from scratch, or with ``resume`` (a run id or config name) continue a stopped run
+    from its last ``train_state.pt``. A single-env run resumes exactly; with ``num_envs > 1``
+    the workers start new games but keep the snapshot pool."""
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     p = cfg.ppo
@@ -138,21 +150,47 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
     rules = cfg.rules.to_rules()
 
     store = Store(data_dir / "catan.db")
-    run_id = store.start_run("train", cfg.model_dump(), cfg.name)
+    saved: dict[str, Any] | None = None
+    if resume is None:
+        run_id = store.start_run("train", cfg.model_dump(), cfg.name)
+    else:
+        run_id = store.find_run(resume)["id"]
+        state_path = data_dir / "runs" / run_id / "train_state.pt"
+        if not state_path.exists():
+            store.close()
+            raise FileNotFoundError(f"run {run_id} has no train_state.pt (needs checkpoint_every)")
+        saved = torch.load(state_path, weights_only=False)
+        store.reopen_run(run_id)
     run_dir = data_dir / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    metrics_file = (run_dir / "metrics.jsonl").open("a")
-    log(f"run {run_id}: metrics -> {run_dir / 'metrics.jsonl'}")
+    metrics_path = run_dir / "metrics.jsonl"
+    if saved is not None and metrics_path.exists():  # drop rows logged after the saved state
+        kept = [
+            line
+            for line in metrics_path.read_text().splitlines()
+            if line.strip() and json.loads(line)["steps"] <= saved["steps"]
+        ]
+        metrics_path.write_text("".join(line + "\n" for line in kept))
+    metrics_file = metrics_path.open("a")
+    log(f"run {run_id}: metrics -> {metrics_path}")
+    if saved is not None:
+        log(f"  resuming at step {saved['steps']}")
 
     model = ActorCritic(p.hidden).to(p.device)
     parent_id = None
-    if cfg.init_policy:
+    if saved is not None:
+        parent_id = saved["parent_id"]
+    elif cfg.init_policy:
         init = load_policy(resolve_policy_path(cfg.init_policy, data_dir))
         assert isinstance(init, PPOAgent), "init_policy must be a PPO policy"
         model.load_state_dict(init.model.state_dict())
         parent_id = getattr(init, "spec", "").removeprefix("policy:") or None
     model.eval()
     opt = torch.optim.Adam(model.parameters(), lr=p.lr, eps=1e-5)
+    if saved is not None:
+        model.load_state_dict(saved["model"])
+        opt.load_state_dict(saved["opt"])
+        rng = saved["rng"]
 
     logged: set[str] = set()
     league_cfg = cfg.league.model_copy(
@@ -165,16 +203,25 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
         "fast_win_turns": p.fast_win_turns,
     }
     workers = None
+    ep_return = 0.0
     if p.num_envs > 1:
+        # New worker seeds on resume, so the restarted workers don't replay the same games.
+        worker_seed = cfg.seed if saved is None else cfg.seed + saved["steps"]
         workers = RolloutWorkers(
-            p.num_envs, rules, env_kwargs, p.gamma, league_cfg, p.hidden, cfg.seed, data_dir
+            p.num_envs, rules, env_kwargs, p.gamma, league_cfg, p.hidden, worker_seed, data_dir
         )
+        for snap in saved["snapshots"] if saved is not None else []:
+            workers.add_snapshot_state(snap)
         buf = RolloutBuffer(p.rollout_steps + CHUNK, FEATURE_DIM, NUM_ACTIONS)
     else:
-        league = League(league_cfg, p.hidden, rng, data_dir)
-        env = CatanSingleAgentEnv(opponents=league.sample_opponents, config=rules, **env_kwargs)
         buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
-        obs, info = env.reset(seed=cfg.seed)
+        if saved is None:
+            league = League(league_cfg, p.hidden, rng, data_dir)
+            env = CatanSingleAgentEnv(opponents=league.sample_opponents, config=rules, **env_kwargs)
+            obs, info = env.reset(seed=cfg.seed)
+        else:  # pickled together with rng, so they still share it
+            league, env = saved["league"], saved["env"]
+            obs, info, ep_return = saved["obs"], saved["info"], saved["ep_return"]
 
     def run_eval(seed: int) -> dict[str, float]:
         if workers is None:
@@ -190,9 +237,17 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
     recent_wins: deque[float] = deque(maxlen=100)
     recent_returns: deque[float] = deque(maxlen=100)
     recent_turns: deque[int] = deque(maxlen=100)
-    ep_return = 0.0
     history: list[dict[str, Any]] = []
     last_eval: dict[str, float] = {}
+    if saved is not None:
+        steps, episodes, checkpointed = saved["steps"], saved["episodes"], saved["steps"]
+        recent_wins.extend(saved["recent_wins"])
+        recent_returns.extend(saved["recent_returns"])
+        recent_turns.extend(saved["recent_turns"])
+        last_eval = saved["last_eval"]
+        history = [saved["last_row"]] if saved["last_row"] else []
+        torch.set_rng_state(saved["torch_rng"])
+    t_steps = steps  # steps/sec counts from here
 
     try:
         while steps < p.total_steps:
@@ -251,7 +306,8 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
             buf.compute_returns(last_values, p.gamma, p.gae_lambda)
             upd = {**_rollout_stats(buf), **_ppo_update(model, opt, buf, p, rng)}
             ce = cfg.checkpoint_every
-            if ce and steps // ce > checkpointed // ce:
+            save_state = bool(ce and steps // ce > checkpointed // ce)
+            if save_state:
                 ckpt, _ = save_policy(
                     PPOAgent(p.hidden, model=model),
                     data_dir,
@@ -269,7 +325,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 "win_rate_100": float(np.mean(recent_wins)) if recent_wins else None,
                 "return_100": float(np.mean(recent_returns)) if recent_returns else None,
                 "turns_100": float(np.mean(recent_turns)) if recent_turns else None,
-                "sps": steps / (time.perf_counter() - t0),
+                "sps": (steps - t_steps) / (time.perf_counter() - t0),
                 "snapshots": len(league.snapshots) if workers is None else workers.snapshots,
                 "lr": opt.param_groups[0]["lr"],
                 **upd,
@@ -278,6 +334,26 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
             history.append(row)
             metrics_file.write(json.dumps(row) + "\n")
             metrics_file.flush()
+            if save_state:
+                state: dict[str, Any] = {
+                    "steps": steps,
+                    "episodes": episodes,
+                    "parent_id": parent_id,
+                    "model": model.state_dict(),
+                    "opt": opt.state_dict(),
+                    "rng": rng,
+                    "torch_rng": torch.get_rng_state(),
+                    "recent_wins": list(recent_wins),
+                    "recent_returns": list(recent_returns),
+                    "recent_turns": list(recent_turns),
+                    "last_eval": last_eval,
+                    "last_row": row,
+                }
+                if workers is None:
+                    state.update(league=league, env=env, obs=obs, info=info, ep_return=ep_return)
+                else:
+                    state["snapshots"] = workers.snapshot_states
+                _save_state(run_dir / "train_state.pt", state)
             log(
                 f"steps {steps:>8} ep {episodes:>5} win100 {row['win_rate_100'] or 0:.2f} "
                 f"ent {upd['entropy']:.2f} kl {upd['approx_kl']:.4f} clip {upd['clip_frac']:.2f} "

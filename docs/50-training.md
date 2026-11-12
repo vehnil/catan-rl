@@ -45,7 +45,26 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `league.snapshot_every` / `max_snapshots` | 20,000 / 5 | Snapshot cadence and pool size |
 | `league.lineup` | false | true: `fixed_opponents` is the exact 3-seat lineup (shuffled per game) instead of a pool |
 | `eval_every` / `eval_games` / `eval_opponents` | 50,000 / 40 / 3× random | Periodic evaluation |
-| `checkpoint_every` | null | Save the policy every N steps as `<name>@<steps>-<run id>`, for `catan curve`. Checkpoints don't affect `init_policy: <config name>`, which still picks the final policy |
+| `checkpoint_every` | null | Save the policy every N steps as `<name>@<steps>-<run id>`, for `catan curve`, plus the full training state for `--resume`. Checkpoints don't affect `init_policy: <config name>`, which still picks the final policy |
+
+### Resuming a stopped run
+
+With `checkpoint_every` set, each checkpoint also writes `data/runs/<run_id>/train_state.pt`, replacing the previous one atomically. It holds:
+- the model and optimizer state;
+- the step and episode counters;
+- the RNG states;
+- the recent-game windows;
+- the opponent snapshot pool.
+
+```bash
+catan train experiments/v7_baseline/baseline_s1.yaml --resume <run id or config name>
+```
+
+- **What carries on:** the run keeps its id and metrics file. Metrics rows logged after the saved state are dropped, so nothing is counted twice. Checkpoints re-saved after the resume point replace the older ones in `catan curve`.
+- **Changing the config on resume:** you can pass a config with a larger `total_steps` to extend a finished run. Other changes take effect from the resume point, but the run's stored config isn't updated.
+- **How exact it is:**
+  - A single-env run (`num_envs: 1`) resumes exactly. The result matches an uninterrupted run, weights and metrics included.
+  - With parallel workers, the workers start new games (with new seeds) but get the saved snapshot pool back.
 
 ## Results so far
 

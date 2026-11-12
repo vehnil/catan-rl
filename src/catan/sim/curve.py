@@ -30,10 +30,7 @@ class Checkpoint:
 
 def run_checkpoints(store: Store, run: str) -> tuple[str, list[Checkpoint]]:
     """``run`` is a run id or a training config name (newest run with that name)."""
-    runs = [r for r in store.runs(limit=10_000) if run in (r["id"], r["name"])]
-    if not runs:
-        raise KeyError(f"no run {run!r}")
-    run_id = runs[0]["id"]
+    run_id = store.find_run(run)["id"]
     rows = [p for p in store.policies() if p["run_id"] == run_id]
     if not rows:
         raise KeyError(f"run {run_id} has no saved policies")
@@ -41,12 +38,14 @@ def run_checkpoints(store: Store, run: str) -> tuple[str, list[Checkpoint]]:
     parent = rows[0]["parent_id"]
     if parent:
         out.append(Checkpoint("pre", parent, 0))
-    staged = []
-    for p in rows:
+    # A resumed run re-saves checkpoints past its resume point; keep the newest of each.
+    newest: dict[tuple[str, int], Checkpoint] = {}
+    for p in sorted(rows, key=lambda r: r["created_at"]):
         m = read_manifest(p["path"])
         steps = int(m.get("metrics", {}).get("steps", 0))
         label = str(steps) if m.get("metrics", {}).get("checkpoint") else "final"
-        staged.append(Checkpoint(label, p["id"], steps))
+        newest[(label, steps)] = Checkpoint(label, p["id"], steps)
+    staged = list(newest.values())
     staged.sort(key=lambda c: (c.steps, c.label == "final"))
     final_steps = {c.steps for c in staged if c.label == "final"}
     # The last checkpoint usually lands on the final step too: same weights, so skip it.

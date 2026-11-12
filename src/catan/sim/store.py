@@ -103,6 +103,23 @@ class Store:
         )
         self.conn.commit()
 
+    def reopen_run(self, run_id: str) -> None:
+        """Mark a stopped run as running again (training resumed)."""
+        self.conn.execute(
+            "UPDATE runs SET status = 'running', finished_at = NULL WHERE id = ?", (run_id,)
+        )
+        self.conn.commit()
+
+    def find_run(self, ref: str) -> dict[str, Any]:
+        """A run by id, or the newest run with that config name."""
+        row = self.conn.execute(
+            "SELECT * FROM runs WHERE id = ? OR name = ? ORDER BY id = ? DESC, created_at DESC",
+            (ref, ref, ref),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"no run {ref!r}")
+        return dict(row)
+
     def runs(self, limit: int = 20) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)

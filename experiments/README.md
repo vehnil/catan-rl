@@ -15,6 +15,23 @@ What we've learned across versions, and hypotheses for training better: [notes/f
 
 Config fields and defaults are in `src/catan/config/models.py`. Unknown keys are rejected. See [docs/50-training.md](../docs/50-training.md) for the training loop.
 
+## Running an experiment
+
+From v8 on, run experiments with the runner rather than by hand:
+
+```bash
+git commit ...                                   # the runner refuses uncommitted changes
+catan experiment run experiments/vN/experiment.yaml   # launches in the background, opens the live view
+catan experiment watch vN                        # reattach later (Ctrl-C closes the view only)
+catan experiment status vN                       # one-shot view
+catan experiment stop vN                         # stop; `run` again continues from checkpoints
+```
+
+- **An experiment file** lists the training configs (one per seed), the comparison written down before the run, and the analysis to run at the end. Copy [v7_baseline/experiment.yaml](v7_baseline/experiment.yaml) to start one.
+- **It keeps running** if the terminal or Claude Code closes, and resumes runs after crashes.
+- **Results:** `data/experiments/<name>/report.md`.
+- **Exact reproducibility:** set `ppo.deterministic_collection: true` in the training configs.
+
 ## Evaluation protocol (from v7 on)
 
 v2–v6 drew conclusions from 60–200 games and one to four seeds, which is often within the noise ([findings](../notes/findings.md) 12). From v7 on, every experiment follows these rules:

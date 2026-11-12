@@ -10,6 +10,11 @@ A critique against standard RL practice found that v2–v6 trained far too brief
 - [x] **Resumable long runs:** `train_state.pt` at each checkpoint, `catan train --resume`.
 - [x] **Evaluation protocol:** VP margin and rank as primary metrics, the `catan rate` reference rating, `catan compare` across seeds, `#argmax` policies. The protocol is in `experiments/README.md`.
 - [ ] **v7 baseline:** continuous self-play against the current policy plus a 40-snapshot history plus 20% fixed opponents, 20M steps × 3 seeds, overnight. Discuss before anything else.
+- [x] **Experiment runner** (`catan experiment run | watch | status | stop`):
+  - unattended, detached runs from a frozen code snapshot, with auto-resume after crashes;
+  - analysis and `report.md` at the end;
+  - a live dashboard;
+  - provenance per run, and `ppo.deterministic_collection` for exact parallel reproducibility.
 - [ ] **v8 reward:** rank reward against win/loss on the v7 setup, 3 seeds each.
 - [ ] **v9 network:** per-vertex features, then a board-aware (graph) network, against the v7 baseline.
 - [ ] Maybe: PFSP opponent sampling (favour snapshots the learner loses to), if v7's uniform pool plateaus.

@@ -435,6 +435,71 @@ def health(
             typer.echo(f"  @ {w['steps']}: {msg}")
 
 
+experiment_app = typer.Typer(
+    no_args_is_help=True, help="Run experiments unattended, and watch them (see experiments/)."
+)
+app.add_typer(experiment_app, name="experiment")
+
+ExpTarget = Annotated[str, typer.Argument(help="Experiment file (.yaml), or experiment name.")]
+
+
+def _exp_dir(target: str, data_dir: str) -> Path:
+    if target.endswith((".yaml", ".yml")):
+        from catan.sim.experiment import Experiment
+
+        return Experiment(target).dir
+    return Path(data_dir) / "experiments" / target
+
+
+@experiment_app.command("run")
+def experiment_run(
+    manifest: Annotated[Path, typer.Argument(help="Experiment file.")],
+    allow_dirty: Annotated[
+        bool, typer.Option(help="Run even with uncommitted changes (recorded in provenance).")
+    ] = False,
+    watch: Annotated[bool, typer.Option(help="Open the live view after launching.")] = True,
+) -> None:
+    """Start an experiment in the background, or continue a stopped one."""
+    from catan.sim import dashboard
+    from catan.sim.experiment import Experiment, launch
+
+    try:
+        state = launch(manifest, allow_dirty=allow_dirty)
+    except RuntimeError as e:
+        raise typer.BadParameter(str(e)) from e
+    exp_dir = Experiment(manifest).dir
+    typer.echo(f"launched {state['name']} (driver pid {state['driver_pid']}) -> {exp_dir}")
+    typer.echo("closing this terminal won't stop it; `catan experiment watch` reattaches")
+    if watch:
+        dashboard.watch(exp_dir)
+
+
+@experiment_app.command("watch")
+def experiment_watch(target: ExpTarget, interval: float = 10.0, data_dir: DataOpt = "data") -> None:
+    """Live view: progress, speed, ETA, latest eval and health per run (Ctrl-C to close)."""
+    from catan.sim import dashboard
+
+    dashboard.watch(_exp_dir(target, data_dir), interval)
+
+
+@experiment_app.command("status")
+def experiment_status(target: ExpTarget, data_dir: DataOpt = "data") -> None:
+    """One-shot view of an experiment."""
+    from rich.console import Console
+
+    from catan.sim import dashboard
+
+    Console().print(dashboard.render(dashboard.snapshot(_exp_dir(target, data_dir))))
+
+
+@experiment_app.command("stop")
+def experiment_stop(target: ExpTarget, data_dir: DataOpt = "data") -> None:
+    """Stop an experiment and all its runs (`catan experiment run` continues it later)."""
+    from catan.sim.experiment import stop
+
+    typer.echo("stopped" if stop(_exp_dir(target, data_dir)) else "not running")
+
+
 @app.command()
 def benchmark(games: int = 50, agent: str = "random", workers: int = 1) -> None:
     """Measure engine + agent throughput (games/min)."""

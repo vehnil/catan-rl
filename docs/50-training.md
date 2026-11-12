@@ -21,7 +21,7 @@ The trainer runs the learner in `CatanSingleAgentEnv`, draws opponents from the 
 5. Every `eval_every` steps, play `eval_games` against `eval_opponents`, rotating the learner through all 4 seats.
 6. At the end: a final evaluation, then the policy is saved to `data/policies/<id>` and registered in the store with lineage (`parent_id` if warm-started via `init_policy`).
 
-Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate, return and game length (turns) over the last 100 games, steps/sec, learning rate, losses, entropy, approx KL (the `(r − 1) − log r` estimator), clip fraction, gradient norm (before clipping), epochs run, and the latest eval. Two rollout statistics:
+Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate, return and game length (turns) over the last 100 games, steps/sec (since the start, `sps`, and over the last update, `sps_recent`), wall-clock `time`, learning rate, losses, entropy, approx KL (the `(r − 1) − log r` estimator), clip fraction, gradient norm (before clipping), epochs run, and the latest eval. Two rollout statistics:
 - **`explained_var`:** `1 − Var(returns − V) / Var(returns)`. This is the main health check: near 0 means the value head predicts nothing, so the advantages are mostly noise.
 - **`value_mean`:** the mean value prediction.
 
@@ -38,6 +38,7 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `ppo.vp_reward_scale` | 0.05 | Dense ΔVP shaping on top of the ±1 outcome |
 | `ppo.num_envs` | 1 | Parallel rollout workers; see below |
 | `ppo.games_per_worker` | 1 | Games each worker plays side by side, batching their network decisions; see below. Needs `num_envs > 1` |
+| `ppo.deterministic_collection` | false | true: each worker collects a fixed share of every rollout, merged in worker order, so parallel runs reproduce exactly (same config, seed and code give the same weights). Fast workers then wait for slow ones |
 | `ppo.target_kl` | null | Stop an update's epochs early once their mean KL exceeds this |
 | `ppo.lr_schedule` | constant | `linear` decays the learning rate to 0 at `total_steps`, standard for long runs |
 | `ppo.fast_win_bonus` / `fast_win_turns` | 0 / 200 | Extra reward for a win, linear from the full bonus at turn 0 to 0 at `fast_win_turns`; losses get none |
@@ -48,6 +49,8 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `league.lineup` | false | true: `fixed_opponents` is the exact 3-seat lineup (shuffled per game) instead of a pool |
 | `eval_every` / `eval_games` / `eval_opponents` | 50,000 / 40 / 3× random | Periodic evaluation |
 | `checkpoint_every` | null | Save the policy every N steps as `<name>@<steps>-<run id>`, for `catan curve`, plus the full training state for `--resume`. Checkpoints don't affect `init_policy: <config name>`, which still picks the final policy |
+
+Each run also writes `data/runs/<run_id>/provenance.json` (`sim/provenance.py`) when it starts. It records the git commit and branch, whether there were uncommitted changes (and which files), a config hash, and the Python and package versions. Each resume adds an entry.
 
 ### Resuming a stopped run
 
@@ -80,7 +83,7 @@ catan train experiments/v7_baseline/baseline_s1.yaml --resume <run id or config 
   - It hands out chunks of 64 steps until `rollout_steps` is reached, so a rollout can run up to 63 steps over.
   - It runs the update.
 
-  Episodes continue across rollouts. Snapshots and evals happen between rollouts, and eval games are split across the workers. `num_envs: 1` (the default) keeps the original single-process loop exactly. Parallel runs are reproducible only up to timing: the order in which chunks arrive decides the rollout's row order, so floating-point sums (and later the weights) can differ in the last digits between two runs of the same config. Use `num_envs: 1` when you need runs that match exactly.
+  Episodes continue across rollouts. Snapshots and evals happen between rollouts, and eval games are split across the workers. `num_envs: 1` (the default) keeps the original single-process loop exactly. Parallel runs are reproducible only up to timing: the order in which chunks arrive decides the rollout's row order, so floating-point sums (and later the weights) can differ in the last digits between two runs of the same config. Use `num_envs: 1`, or `deterministic_collection: true`, when you need runs that match exactly.
 - **Batched games (`ppo.games_per_worker`).** With more than one, each worker plays that many games side by side. Every game always waits on exactly one network decision: the learner's, or a network opponent's (random and greedy opponents move inline). Each round, the worker runs the largest group of games waiting on the same model as one batched forward pass.
   - **What batches:** the learner, and current-policy opponents (`latest_prob`), share one model across games, so they batch well. Past snapshots are spread over many models and mostly run one at a time.
   - **Why it helps:** at batch size 1, per-call overhead and reading the roughly 2.8 MB of weights from memory dominate. Under load the weights get evicted from the cache between calls, which made this the bottleneck.

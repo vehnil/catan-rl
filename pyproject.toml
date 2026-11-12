@@ -14,6 +14,7 @@ dependencies = [
     "pettingzoo>=1.27.0",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
+    "rich>=13",
     "safetensors>=0.8.0",
     "torch>=2.15.0",
     "typer>=0.29.0",

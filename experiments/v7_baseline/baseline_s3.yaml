@@ -1,0 +1,28 @@
+# The conventional baseline: one continuous run from scratch, no stages.
+# Opponent seats: the current policy 50%, a past snapshot 30% (uniform over the last 40,
+# one every 500k steps), a fixed opponent 20% (random / greedy:epsilon=0.5 / greedy).
+# Settings frozen for v7; three seeds (s1..s3) differ only in the seed. See ../README.md.
+name: v7_baseline_s3
+seed: 52
+ppo:
+  total_steps: 20000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  lr_schedule: linear
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  entropy_coef: 0.01
+  num_envs: 2
+league:
+  fixed_opponents: [random, "greedy:epsilon=0.5", greedy]  # pool: each fixed seat drawn uniformly
+  lineup: false
+  latest_prob: 0.5
+  self_play_prob: 0.6  # of the remaining seats, once snapshots exist
+  snapshot_every: 500000
+  max_snapshots: 40
+eval_every: 1000000
+eval_games: 100
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 1000000  # policy + resumable train state

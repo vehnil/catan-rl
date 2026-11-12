@@ -634,3 +634,29 @@ def test_compare_groups_mean_and_interval():
     assert [(r["group"], r["n"]) for r in out] == [("x", 2), ("y", 1)]
     assert out[0]["vp_margin"][0] == -1.5 and out[0]["vp_margin_each"] == [-1.0, -2.0]
 
+
+def test_league_latest_policy_seats():
+    import numpy as np
+
+    from catan.agents.learned.ppo.agent import PPOAgent
+    from catan.agents.learned.ppo.league import League
+    from catan.agents.learned.ppo.model import ActorCritic
+    from catan.config.models import LeagueConfig
+
+    current = ActorCritic([32])
+    always = League(
+        LeagueConfig(fixed_opponents=["random"], latest_prob=1.0), [32], np.random.default_rng(0)
+    )
+    assert all(a.name == "random" for a in always.sample_opponents())  # not set yet: fixed
+    always.latest = current
+    seats = always.sample_opponents()
+    assert all(isinstance(a, PPOAgent) and a.model is current for a in seats)
+
+    mixed = League(
+        LeagueConfig(fixed_opponents=["random"], latest_prob=0.5, self_play_prob=0),
+        [32],
+        np.random.default_rng(0),
+    )
+    mixed.latest = current
+    kinds = [a.name for _ in range(200) for a in mixed.sample_opponents()]
+    assert 0.4 < kinds.count("ppo") / len(kinds) < 0.6

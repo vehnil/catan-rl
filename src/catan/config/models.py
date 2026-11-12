@@ -104,6 +104,8 @@ class LeagueConfig(_Strict):
     snapshot_every: int = Field(20_000, ge=1)  # env steps between snapshots
     max_snapshots: int = 5
     self_play_prob: float = Field(0.5, ge=0, le=1)  # P(an opponent seat is a past snapshot)
+    # P(an opponent seat is the current policy), drawn before snapshots and fixed opponents.
+    latest_prob: float = Field(0.0, ge=0, le=1)
     # True: fixed_opponents is the exact 3-seat lineup (shuffled each game) instead of a pool.
     lineup: bool = False
 

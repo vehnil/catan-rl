@@ -1,0 +1,25 @@
+# Short check of the v7 setup (resume, health, curve, rate) before the overnight runs.
+name: v7_smoke
+seed: 59
+ppo:
+  total_steps: 200000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  lr_schedule: linear
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  entropy_coef: 0.01
+  num_envs: 2
+league:
+  fixed_opponents: [random, "greedy:epsilon=0.5", greedy]
+  lineup: false
+  latest_prob: 0.5
+  self_play_prob: 0.6
+  snapshot_every: 50000
+  max_snapshots: 40
+eval_every: 100000
+eval_games: 20
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 100000

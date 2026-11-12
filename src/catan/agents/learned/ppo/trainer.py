@@ -219,11 +219,13 @@ def train(
         buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
         if saved is None:
             league = League(league_cfg, p.hidden, rng, data_dir)
+            league.latest = model
             env = CatanSingleAgentEnv(opponents=league.sample_opponents, config=rules, **env_kwargs)
             obs, info = env.reset(seed=cfg.seed)
         else:  # pickled together with rng, so they still share it
             league, env = saved["league"], saved["env"]
             obs, info, ep_return = saved["obs"], saved["info"], saved["ep_return"]
+            league.latest = model  # the "latest" opponent is the network being trained
 
     def run_eval(seed: int) -> dict[str, float]:
         if workers is None:

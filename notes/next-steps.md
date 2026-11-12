@@ -2,7 +2,19 @@
 
 Roughly in order. See [goals](goals.md) for the why.
 
-## Up next: ground-up ladders (no imitation)
+## Up next: put training on a conventional footing
+
+A critique against standard RL practice found that v2–v6 trained far too briefly (0.5–1M steps), never ran the plain self-play baseline, and drew conclusions from noisy, small samples. Fix in this order (plan: phases 1–6):
+
+- [x] **PPO health:** explained variance, a better KL estimator, grad norm, `target_kl`, linear LR decay, `catan health`. The retroactive check is [findings.md](findings.md) 13.
+- [x] **Resumable long runs:** `train_state.pt` at each checkpoint, `catan train --resume`.
+- [x] **Evaluation protocol:** VP margin and rank as primary metrics, the `catan rate` reference rating, `catan compare` across seeds, `#argmax` policies. The protocol is in `experiments/README.md`.
+- [ ] **v7 baseline:** continuous self-play against the current policy plus a 40-snapshot history plus 20% fixed opponents, 20M steps × 3 seeds, overnight. Discuss before anything else.
+- [ ] **v8 reward:** rank reward against win/loss on the v7 setup, 3 seeds each.
+- [ ] **v9 network:** per-vertex features, then a board-aware (graph) network, against the v7 baseline.
+- [ ] Maybe: PFSP opponent sampling (favour snapshots the learner loses to), if v7's uniform pool plateaus.
+
+## Earlier: ground-up ladders (no imitation)
 
 The project prefers learning from the ground up, so cloning waits (see below). The v3 ladder (3 random → 2 random + 1 greedy → …) stalled at stage 2: 0–2.5% wins and about 3.5 VP for all of its 1M steps. Greedy cashes in on the random players' mistakes and finishes around turn 60, long before the policy does. The policy loses every game, so the win/loss reward never tells it which moves were better.
 

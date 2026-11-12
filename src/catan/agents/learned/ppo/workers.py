@@ -88,6 +88,7 @@ class _Actor:
             opponents=self.league.sample_opponents, config=rules, **env_kwargs
         )
         self.model = ActorCritic(hidden).eval()
+        self.league.latest = self.model  # updated in place with each rollout's weights
         self.obs, self.info = self.env.reset(seed=seed)
         self.ep_return = 0.0
 

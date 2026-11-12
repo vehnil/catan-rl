@@ -295,3 +295,34 @@ Checkpoints (200k / 400k / 600k / 800k): s1 `7cbee1e5c5` `a79e3e27cf` `426387e95
 - **No forgetting:** all four still beat 3× random 97–100% of the time.
 - **Best results against greedy so far.** Every learner gained 0.24–0.71 VP over its stage-1 self, and all four beat the previous best (v5 A, 4.79 VP and 2.5% wins). Unlike v4, self-play here helped against greedy, even though greedy never appeared in training. The differences from v4 are a population of peers instead of one frozen copy, and about 25% random seats.
 
+### v7_baseline: the conventional self-play baseline
+
+The plain recipe nearly every self-play project starts from, and that we had never run: one continuous run from scratch, no stages, with the opponent drawn from the policy's own history ([findings](../notes/findings.md), critique of v2–v6).
+
+- **Opponent seats, each drawn independently:**
+  - the current policy, 50%;
+  - a uniformly chosen past snapshot, 30% (one every 500k steps, last 40 kept, so the whole run);
+  - a fixed opponent, 20% (random, `greedy:epsilon=0.5` or greedy).
+- **Settings, frozen for v7:**
+  - 20M steps, linear learning-rate decay from 2.5e-4.
+  - The plain reward: ±1 plus 0.05 per VP, no speed bonus.
+  - `[512, 256]` MLP, `num_envs: 2`.
+  - Checkpoints and resumable state every 1M.
+- **Three seeds,** s1–s3 (seeds 50–52), run at once overnight.
+- **`smoke.yaml`:** a 200k-step check of the same setup.
+
+**Comparison, set before the run:**
+- *Primary:* the reference rating (`catan rate`, [reference.yaml](reference.yaml)) of the three finals, mean and 95% interval over seeds.
+- *Secondary:* VP margin and mean rank against 3× greedy (`catan compare`, 400 games), against v6 stage 2's four finals.
+- *Better* means the three-seed interval for VP margin against 3× greedy lies entirely above v6's.
+- *Training health:* explained variance stays above about 0.3, KL at or below about 0.02, and the reference rating rises across the 1M checkpoints. If it plateaus, the next step is longer runs or PFSP opponent sampling, not new settings.
+
+```bash
+for s in s1 s2 s3; do
+  catan train experiments/v7_baseline/baseline_$s.yaml > data/v7_baseline_$s.log 2>&1 &
+done; wait
+# after a crash or reboot:
+catan train experiments/v7_baseline/baseline_s1.yaml --resume v7_baseline_s1
+```
+
+Results: not run yet.

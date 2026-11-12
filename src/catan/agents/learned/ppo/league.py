@@ -1,4 +1,9 @@
-"""Opponent pool for self-play: fixed agents plus frozen snapshots of the learner."""
+"""Opponent pool for self-play: the current policy, frozen snapshots of the learner, and fixed agents.
+
+Each opponent seat is drawn independently: the current policy with
+``latest_prob``, else a uniformly chosen past snapshot with ``self_play_prob``
+(once any exist), else a fixed opponent.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +33,8 @@ class League:
         self.rng = rng
         self.data_dir = data_dir
         self.snapshots: list[ActorCritic] = []
+        # The learner's own network, set by the owner; plays the "latest" seats.
+        self.latest: ActorCritic | None = None
         # Stored PPO opponents ("policy:<ref>") are loaded once and shared frozen across games.
         self._frozen: dict[str, PPOAgent] = {}
 
@@ -63,7 +70,14 @@ class League:
         )
         out: list[Agent] = []
         for i in range(NUM_PLAYERS - 1):
-            if self.snapshots and self.rng.random() < self.cfg.self_play_prob:
+            # Only draw for latest_prob when it is on, so other configs keep their RNG stream.
+            if (
+                self.cfg.latest_prob
+                and self.latest is not None
+                and self.rng.random() < self.cfg.latest_prob
+            ):
+                out.append(PPOAgent(self.hidden, model=self.latest))
+            elif self.snapshots and self.rng.random() < self.cfg.self_play_prob:
                 model = self.snapshots[int(self.rng.integers(len(self.snapshots)))]
                 out.append(PPOAgent(self.hidden, model=model))
             elif lineup is not None:

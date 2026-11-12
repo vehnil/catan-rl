@@ -1,6 +1,6 @@
 # Findings and hypotheses
 
-What the experiments so far (v2–v5, see [experiments/README.md](../experiments/README.md)) have shown, what we think is going on, and what other Catan and multi-agent RL work suggests trying. Written after v5 stage 1, Nov 2026.
+What the experiments so far (v2–v7, see [experiments/README.md](../experiments/README.md)) have shown, what we think is going on, and what other Catan and multi-agent RL work suggests trying. Started after v5 stage 1, Nov 2026; findings 14–19 are from the v7 baseline.
 
 ## Findings
 
@@ -28,6 +28,55 @@ What the experiments so far (v2–v5, see [experiments/README.md](../experiments
 
     The value head learned "I lose" accurately, so the advantages were tiny. Per-rollout advantage normalisation then scales that near-noise up to full-size updates, which fits the policy drifting rather than improving: v4 stage 3's entropy rose from 1.11 to 1.44. Explained variance wasn't logged then; it is now, so future runs can confirm this directly.
 
+14. **The v7 baseline beats v6 stage 2 on the comparison set before the run.** v7 is continuous self-play: 50% the current policy, 30% a pool of up to 40 past snapshots, 20% fixed opponents (random, `greedy:epsilon=0.5`, greedy). It ran 20M steps × 3 seeds with linear learning-rate decay. Final policies, 400 games each, mean with 95% interval over seeds:
+
+    | Lineup | Metric | v7 (3 seeds) | v6 stage 2 (4 seeds) |
+    |---|---|---|---|
+    | 3× greedy | VP margin | −5.61 [−5.95, −5.27] | −6.63 [−6.84, −6.43] |
+    | 3× greedy | Mean rank | 3.47 [3.41, 3.53] | 3.75 [3.68, 3.83] |
+    | 3× greedy | Win rate | 1.8% [1.1, 2.6] | 0.1% |
+    | 3× greedy | Mean VP | 4.44 | 3.46 |
+    | 2 random + greedy | VP margin | −4.28 [−4.83, −3.73] | −5.26 [−5.45, −5.07] |
+    | 2 random + greedy | Win rate | 9.5% | 3.4% |
+
+    Every interval is clear of v6's. It still trails the best greedy player by about 5.6 VP.
+
+15. **Against 3× greedy, v7 now places second; v6 rarely did.** 400 games per final policy:
+
+    | Policy | 1st | 2nd | 3rd | 4th |
+    |---|---|---|---|---|
+    | v7 s1 | 1.8% | 12.8% | 23.0% | 62.5% |
+    | v7 s2 | 2.8% | 11.8% | 20.8% | 64.8% |
+    | v7 s3 | 1.5% | 13.0% | 24.5% | 61.0% |
+    | v6 stage 2 (mean of 4) | 0.3% | 5.8% | 15.6% | 78.4% |
+
+    The gain is mostly from last place to second and third. Wins stay rare.
+
+16. **The reference rating climbs steadily through the whole run.** It's computed against the fixed reference set (400 games per checkpoint, every 2M):
+    - It rose about 1.5 points per 1M steps, from 16–20 at 2M to a peak of 31.7–34.5 at 16–18M. The finals are 28.7–30.8.
+    - All three seeds passed v6 s4 (26.0) and `greedy:epsilon=0.5` (27.3) between 8M and 14M.
+    - They stay well below `greedy:epsilon=0.2` (41.8) and greedy (50.3).
+    - All three seeds dropped 2–3 points from peak to final, while the learning rate was near zero and KL was about 0.001, so the policies barely changed. Differences between ratings below about 3 points should therefore be treated as noise, even though the reported uncertainty is about ±1.8.
+
+17. **PPO stayed healthy for 20M steps, unlike the failed greedy stages (finding 13).**
+    - Explained variance held at 0.83–0.87 from start to finish.
+    - Entropy fell smoothly from 1.57 to 1.19.
+    - Value loss *rose* from 0.004 to 0.012 instead of collapsing, so the value head kept facing outcomes it couldn't predict yet.
+    - KL and clip fraction shrank to about zero along with the learning rate.
+
+    Mixing in the current policy and past snapshots keeps most games winnable, about a 25–28% training win rate, so the learning signal never died out.
+
+18. **Against greedy, progress per step is slow, and 100-game evaluations are noisy.**
+    - On the 1M-checkpoint evaluations (100 games against 3× greedy), the mean margin over three seeds improved about 0.08 VP per 1M steps: −7.09 at 1M, −6.26 at 10M, −5.54 at 20M.
+    - Mean rank improved from 3.84 to 3.36.
+    - Single checkpoints moved by ±0.3–0.5 VP. In one case all three seeds jumped together at 18M and fell back at 19M.
+    - The reference rating (finding 16) rises much more clearly than the margin against 3× greedy over the same checkpoints.
+
+19. **Speed fell by a third as the snapshot pool grew.**
+    - Per-seed throughput was about 650 steps/s early in the run and about 450 by the end.
+    - The machine load was unchanged, so the drop followed the pool filling toward 40 snapshots: more distinct opponent models means smaller batched-inference groups per worker.
+    - Earlier, the encoding and batching work (perf A+B) gave 1.69× on a controlled re-run of v6 stage 2: 288 → 505 steps/s per learner.
+
 ## Hypotheses, and what other work suggests
 
 **H1. Rewards that still carry information when losing.** Our reward is ±1 at the end plus a small amount per VP. Against stronger opponents nearly every game is −1, so learning stops (findings 2 and 4).
@@ -44,7 +93,7 @@ What the experiments so far (v2–v5, see [experiments/README.md](../experiments
 - Territory Paint Wars (competitive PPO) found that self-play win rate stays near 50% while win rate against a fixed opponent collapses, from 73.5% to 21.6%. Playing 20% of episodes against a fixed random policy restored it to 77%.
 - Gendre & Kaneko found that training against one fixed strong copy learned poorly and overfit. They used a rolling spread of past checkpoints instead (fictitious self-play).
 - The AlphaStar-style league adds prioritised sampling, which favours opponents the learner struggles against (PFSP).
-- *Tried* in v6 stage 2 (frozen peers plus ~25% random seats): it worked (findings 10 and 11). *Next:* draw peers from several checkpoints, not just the latest.
+- *Tried* in v6 stage 2 (frozen peers plus ~25% random seats): it worked (findings 10 and 11). *Tried* in v7 (current policy plus up to 40 past snapshots plus 20% fixed opponents): it beat v6 stage 2 (findings 14–17).
 
 **H4. A network that knows the board's layout.** Our flat MLP has to work out which hexes touch which vertex from index positions alone, and the board changes every game.
 - Gendre & Kaneko's key result came from encoding the board for a CNN that follows the hex layout, combined with a vector branch for non-board information.

@@ -18,6 +18,10 @@ What the experiments so far (v2–v5, see [experiments/README.md](../experiments
 8. **Policies find exploits in hand-written opponents.** The first PPO round learned 1-for-2 trade offers that greedy accepted, because greedy only checked its own gain. Hardening greedy's acceptance closed it. Expect this again with any rule-based opponent.
 9. **Training is limited by the game engine, not the network.** Python game logic dominates; the network is small. Parallel workers gave about 2.5× on the M1. Metal (MPS) is slower than CPU for both the update (0.48 s vs 0.31 s) and single-position inference (11×).
 
+10. **Self-play against a population of peers, mixed with random, does carry over to greedy.** In v6 stage 2, each learner trained against its three frozen stage-1 peers plus about 25% random seats. All four improved against greedy (4.78–5.13 VP and 4–6.5% wins, the best so far), although greedy never appeared in training. v4's single-copy self-play didn't (finding 5). This supports H3.
+11. **The overfitting curve shows only mild specialisation, starting around 400k steps.** Checkpoints every 200k were scored against the peers, held-out PPO policies, a greedy mix and 3× random on fixed seeds (`catan curve`). Held-out PPO scores rose from 2–12% to 25–48%, and 3× random stayed at 97–100%. Two of four learners (s1, s3) flattened against held-out PPO after about 400k while their peers score kept rising, which suggests stages of about 400–600k against a fixed population, then refreshing the population.
+12. **Seed matters as much as settings.** In v6 stage 1, four seeds with identical settings spread as widely as v5's four different settings, and v5 C's round-robin lead (40%) didn't reproduce (8–19%). Compare settings over several seeds, never one.
+
 ## Hypotheses, and what other work suggests
 
 **H1. Rewards that still carry information when losing.** Our reward is ±1 at the end plus a small amount per VP. Against stronger opponents nearly every game is −1, so learning stops (findings 2 and 4).
@@ -34,7 +38,7 @@ What the experiments so far (v2–v5, see [experiments/README.md](../experiments
 - Territory Paint Wars (competitive PPO) found that self-play win rate stays near 50% while win rate against a fixed opponent collapses, from 73.5% to 21.6%. Playing 20% of episodes against a fixed random policy restored it to 77%.
 - Gendre & Kaneko found that training against one fixed strong copy learned poorly and overfit. They used a rolling spread of past checkpoints instead (fictitious self-play).
 - The AlphaStar-style league adds prioritised sampling, which favours opponents the learner struggles against (PFSP).
-- *Try:* in stage 2 of v6, keep ~20% random seats alongside the frozen peers, and draw peers from several checkpoints.
+- *Tried* in v6 stage 2 (frozen peers plus ~25% random seats): it worked (findings 10 and 11). *Next:* draw peers from several checkpoints, not just the latest.
 
 **H4. A network that knows the board's layout.** Our flat MLP has to work out which hexes touch which vertex from index positions alone, and the board changes every game.
 - Gendre & Kaneko's key result came from encoding the board for a CNN that follows the hex layout, combined with a vector branch for non-board information.

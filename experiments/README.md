@@ -248,4 +248,31 @@ Run `catan curve v6_stage2_sX` on each learner, playing every policy against fou
 
 The policies are its stage-1 starting point ("pre"), each 200k checkpoint, and the final policy ("post"). Overfitting shows up as the peers score rising while the held-out scores flatten or fall.
 
-Stage 2 results: not run yet.
+#### Stage 2 results (1M steps each)
+
+Overfitting curves from `catan curve`, 60 games per cell, seed 5000. Win rate (VP for the greedy mix) at the start, 400k, 800k and the end:
+
+| Learner | Peers (trained on) | Unseen PPO (held out) | Greedy mix VP (held out) | 3× random |
+|---|---|---|---|---|
+| s1 | 17 → 55 → 68 → 75% | 2 → 25 → 22 → 25% | 4.32 → 4.37 → 4.85 → 5.32 | 97 → 100% |
+| s2 | 37 → 60 → 78 → 70% | 12 → 27 → 32 → 48% | 4.25 → 4.60 → 5.13 → 4.88 | 97 → 98% |
+| s3 | 37 → 67 → 90 → 85% | 5 → 25 → 35 → 30% | 4.02 → 4.88 → 4.53 → 4.67 | 97 → 98% |
+| s4 | 13 → 30 → 55 → 80% | 7 → 12 → 32 → 38% | 4.22 → 4.18 → 4.67 → 4.27 | 97% |
+
+Full tables (including 200k and 600k) are in `data/curves/v6_stage2_sX.json`. With 60 games, a single point carries about ±12 points, so read the trends.
+
+The yardstick (200 games, same seeds as v3–v5):
+
+| Policy | + 2 random + greedy | + 3 greedy |
+|---|---|---|
+| s1 `37c99e2fac` | 4.0%, 4.78 VP | 0.5%, 3.50 VP |
+| s2 `e2f768b3ab` | 6.5% [4–11%], 4.92 VP | 0%, 3.53 VP |
+| s3 `cb5cb1c5ef` | 5.0%, 4.98 VP | 1.0%, 3.50 VP |
+| s4 `cb4614a1f1` | 5.5%, 5.13 VP | 0%, 3.62 VP |
+
+Checkpoints (200k / 400k / 600k / 800k): s1 `7cbee1e5c5` `a79e3e27cf` `426387e952` `1ed72852eb`; s2 `535f4ece5c` `b50ae85cca` `d7aef17750` `23bb0a13e1`; s3 `969141c1b9` `0a36b31021` `8d70bd1e5e` `ef253a8e67`; s4 `5ec61ad89c` `a7b186b421` `ec1a6ad758` `c6e08bf595`.
+
+- **No strong overfitting.** Scores against held-out PPO rose from 2–12% to 25–48% (25% is even), so the learners didn't just learn to beat their peers.
+- **Mild late specialisation in s1 and s3:** their held-out PPO score flattens after about 400k while the peers score keeps rising. s2 and s4 kept improving on both.
+- **No forgetting:** all four still beat 3× random 97–100% of the time.
+- **Best results against greedy so far.** Every learner gained 0.24–0.71 VP over its stage-1 self, and all four beat the previous best (v5 A, 4.79 VP and 2.5% wins). Unlike v4, self-play here helped against greedy, even though greedy never appeared in training. The differences from v4 are a population of peers instead of one frozen copy, and about 25% random seats.

@@ -6,13 +6,13 @@ Written before the run, 12 Nov 2026. Background: [findings](../../notes/findings
 
 Is v7 stuck against greedy because it rarely trains against greedy?
 
-v7 beat v6 stage 2 on every pre-registered metric, but against 3× greedy it still trails by 5.6 VP and wins 1.8%. Its reference rating rose about 1.5 points per 1M steps, while its margin against 3× greedy rose only 0.08 VP per 1M: the gains came mostly from beating weaker players. Games against 3× greedy lasted 72–81 turns from start to end of training, so the learner never sped up; it just reached more VP (3.2 → 4.4) before greedy won.
+v7 beat v6 stage 2 on every pre-registered metric, but against 3× greedy it still trails by 5.6 VP and wins 1.8%. Its reference rating rose about 1.5 points per 1M steps, while its margin against 3× greedy rose only 0.08 VP per 1M: the gains came mostly from beating weaker players. Games against 3× greedy lasted 72–81 turns throughout training. Four greedy players also take about 82 turns (below), so game length is set by greedy and isn't a measure of the learner's pace. What did change: the learner reached more VP (3.2 → 4.4) by the time greedy won.
 
 ## Hypothesis
 
 v7's training opponents were 50% the current policy, 30% past snapshots and 20% fixed (random / `greedy:epsilon=0.5` / greedy, drawn uniformly). Full greedy filled only about 7% of seats. The learner mostly played slow copies of itself, which never punish slow play, so nothing pushed it to race to 10 VP.
 
-**If so, raising greedy-style seats to about 36% will improve the margin against 3× greedy, and shorten games against it, more than the same number of steps under v7's mix.**
+**If so, raising greedy-style seats to about 36% will improve the margin against 3× greedy more than the same number of steps under v7's mix.**
 
 ## Design
 
@@ -50,12 +50,12 @@ With three seeds a t-interval is very wide, so this sign-and-size rule is fixed 
 
 **Secondary:**
 - Mean rank and win rate against 3× greedy.
-- Game length against 3× greedy (the pace hypothesis predicts it falls for greedy-heavy).
+- The learner's mean VP against 3× greedy (its VP when the game ends, which is when greedy wins).
 - The reference rating (`reference_v1`), every 1M steps.
 - VP margin in the 2 random + greedy lineup.
 - Control vs the v7 finals, on the same margin rule (question 2).
 
-**Reference point:** greedy vs 3× greedy (400 games), measured before the run, gives the margin, rank and win rate of an agent exactly as strong as greedy.
+**Reference point, measured before the run:** greedy vs 3× greedy, 400 games (`catan sim`, seed 7000, run `d362692c0721`). An agent exactly as strong as greedy scores a **margin of −2.18**, mean rank 2.35, a 25% win rate and 7.26 VP, in games of 81.9 turns. Against that, v7's −5.61 is a gap of about **3.4 VP**, not 5.6.
 
 **Health:** explained variance above about 0.3, KL at or below about 0.02. Stop the greedy-heavy arm if its training `win100` stays below 0.10 for 1M steps, or if value loss falls toward 0.001 (the "I lose" collapse of finding 13).
 
@@ -63,8 +63,7 @@ With three seeds a t-interval is very wide, so this sign-and-size rule is fixed 
 
 | Result | Reading | Next |
 |---|---|---|
-| Greedy-heavy better, games shorter | The opponent mix was the bottleneck | Tune the mix: PFSP, or the epsilon ladder; then the rank reward |
-| Greedy-heavy better, games not shorter | Greedy seats help, but not through pace | Look at what changed (replays, build order) before tuning further |
+| Greedy-heavy better | The opponent mix was the bottleneck | Tune the mix: PFSP, or the epsilon ladder; then the rank reward |
 | No difference, control gains over v7 | Steps still help once the learning rate is live | Longer runs; consider cloud compute |
 | No difference, control flat | Neither steps nor opponents are the bottleneck | The board-aware network (H4) becomes the main line |
 | Greedy-heavy worse | Too much greedy too soon (finding 2) | Raise greedy's share in smaller steps (the epsilon ladder) |

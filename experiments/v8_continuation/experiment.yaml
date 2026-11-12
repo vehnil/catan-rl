@@ -11,7 +11,7 @@ comparison: >
   Primary: VP margin against 3x greedy (400 games per final), paired by seed, greedy-heavy
   minus control. Better = all three differences positive and mean >= +0.3 VP; worse = all
   three negative and mean <= -0.3 VP; otherwise no detectable difference. Secondary: rank,
-  win rate and game length against 3x greedy; reference rating; 2 random + greedy margin;
+  win rate and mean VP against 3x greedy; reference rating; 2 random + greedy margin;
   control vs the v7 finals on the same rule.
 runs:
   - control_s1.yaml

@@ -1,0 +1,23 @@
+# Check of the runner + v8 setup end to end (minutes): catan experiment run smoke_experiment.yaml
+name: v8_smoke
+description: Short end-to-end check of the v8 setup. Not part of v8's results.
+runs: [smoke.yaml]
+max_resumes: 1
+analysis:
+  health: true
+  curve:
+    every: 50000
+    games: 20
+    seed: 5000
+    lineups:
+      greedy3: [greedy, greedy, greedy]
+  rate: null
+  compare:
+    groups:
+      smoke: self
+      v7s1: [d05773d2be]
+    lineups:
+      greedy3: [greedy, greedy, greedy]
+    games: 20
+    seed: 6000
+  workers: 8

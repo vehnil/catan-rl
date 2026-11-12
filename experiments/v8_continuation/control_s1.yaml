@@ -1,0 +1,30 @@
+# v8 control: v7 unchanged, continued 5M steps from the v7 final at a constant
+# learning rate. Seats: current 50%, snapshot 30%, fixed 20%.
+# Starts from the v7 final for the same seed. See v8-proposal.md.
+name: v8_control_s1
+seed: 50
+init_policy: d05773d2be  # v7_baseline_s1 final
+ppo:
+  total_steps: 5000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.0001
+  lr_schedule: constant
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  entropy_coef: 0.01
+  num_envs: 2
+  games_per_worker: 32
+  deterministic_collection: true
+league:
+  fixed_opponents: [random, "greedy:epsilon=0.5", greedy]  # v7 mix: ~7% each of random, eps=0.5, greedy
+  lineup: false
+  latest_prob: 0.5
+  self_play_prob: 0.6
+  snapshot_every: 500000
+  max_snapshots: 40
+eval_every: 1000000
+eval_games: 200
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 1000000  # policy + resumable train state

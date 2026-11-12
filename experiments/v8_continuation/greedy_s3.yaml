@@ -1,0 +1,30 @@
+# v8 greedy-heavy: v7 continued 5M steps with more greedy seats and no random.
+# Seats: current 40%, snapshot 24%, fixed 36% (24% greedy, 12% greedy:epsilon=0.5).
+# Starts from the v7 final for the same seed. See v8-proposal.md.
+name: v8_greedy_s3
+seed: 52
+init_policy: 159e1632e3  # v7_baseline_s3 final
+ppo:
+  total_steps: 5000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.0001
+  lr_schedule: constant
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  entropy_coef: 0.01
+  num_envs: 2
+  games_per_worker: 32
+  deterministic_collection: true
+league:
+  fixed_opponents: [greedy, greedy, "greedy:epsilon=0.5"]  # pool: duplicates weight the draw
+  lineup: false
+  latest_prob: 0.4
+  self_play_prob: 0.4
+  snapshot_every: 500000
+  max_snapshots: 40
+eval_every: 1000000
+eval_games: 200
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 1000000  # policy + resumable train state

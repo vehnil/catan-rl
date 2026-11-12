@@ -1,0 +1,29 @@
+# Short check of the v8 setup: warm start from v7 s1's final, greedy-heavy league,
+# deterministic collection, snapshots, evals and checkpoints. Not part of v8's results.
+name: v8_smoke
+seed: 59
+init_policy: d05773d2be  # v7_baseline_s1 final
+ppo:
+  total_steps: 100000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.0001
+  lr_schedule: constant
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  entropy_coef: 0.01
+  num_envs: 2
+  games_per_worker: 32
+  deterministic_collection: true
+league:
+  fixed_opponents: [greedy, greedy, "greedy:epsilon=0.5"]
+  lineup: false
+  latest_prob: 0.4
+  self_play_prob: 0.4
+  snapshot_every: 25000
+  max_snapshots: 40
+eval_every: 50000
+eval_games: 20
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 50000

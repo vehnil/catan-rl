@@ -1,0 +1,47 @@
+# Run with: catan experiment run experiments/v8_continuation/experiment.yaml
+# Watch:    catan experiment watch v8_continuation
+# The hypothesis, design and decision rule are in v8-proposal.md.
+name: v8_continuation
+description: >
+  Does training against greedy more often fix v7's slow pace? Each v7 final is continued
+  for 5M steps at a constant learning rate 1e-4, under v7's opponent mix (control) or a
+  greedy-heavy mix (24% greedy, 12% greedy:epsilon=0.5, no random). Three seeds per arm,
+  deterministic collection.
+comparison: >
+  Primary: VP margin against 3x greedy (400 games per final), paired by seed, greedy-heavy
+  minus control. Better = all three differences positive and mean >= +0.3 VP; worse = all
+  three negative and mean <= -0.3 VP; otherwise no detectable difference. Secondary: rank,
+  win rate and game length against 3x greedy; reference rating; 2 random + greedy margin;
+  control vs the v7 finals on the same rule.
+runs:
+  - control_s1.yaml
+  - control_s2.yaml
+  - control_s3.yaml
+  - greedy_s1.yaml
+  - greedy_s2.yaml
+  - greedy_s3.yaml
+max_resumes: 3
+analysis:
+  health: true
+  curve:
+    every: 1000000
+    games: 200
+    seed: 5000
+    lineups:
+      greedy3: [greedy, greedy, greedy]
+      mix: [random, random, greedy]
+  rate:
+    reference: experiments/reference.yaml
+    every: 1000000
+    games: 400
+  compare:
+    groups:
+      control: [v8_control_s1, v8_control_s2, v8_control_s3]
+      greedy: [v8_greedy_s1, v8_greedy_s2, v8_greedy_s3]
+      v7: [d05773d2be, 5afc035651, 159e1632e3]
+    lineups:
+      greedy3: [greedy, greedy, greedy]
+      mix: [random, random, greedy]
+    games: 400
+    seed: 6000
+  workers: 8

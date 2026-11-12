@@ -343,3 +343,16 @@ catan train experiments/v7_baseline/baseline_s1.yaml --resume v7_baseline_s1
 ```
 
 Results: not run yet.
+
+### v8_continuation: greedy-heavy continuation vs control
+
+Does training against greedy more often fix v7's slow pace? Each v7 final is continued for 5M steps at a constant learning rate of 1e-4, under v7's own opponent mix (control) or a greedy-heavy mix (24% greedy, 12% `greedy:epsilon=0.5`, no random). Three seeds per arm, paired by seed, with deterministic collection. The hypothesis, design and decision rule are in [v8_continuation/v8-proposal.md](v8_continuation/v8-proposal.md).
+
+```bash
+catan experiment run experiments/v8_continuation/experiment.yaml   # all six runs, then the analysis
+catan experiment watch v8_continuation
+```
+
+`smoke_experiment.yaml` is a few-minute end-to-end check of the same setup.
+
+Results: not run yet.

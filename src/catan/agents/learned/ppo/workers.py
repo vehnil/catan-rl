@@ -352,9 +352,11 @@ class RolloutWorkers:
         seed: int,
         data_dir: str | Path = "data",
         games_per_worker: int = 1,
+        deterministic: bool = False,
     ) -> None:
         self.n = n
         self.games = games_per_worker
+        self.deterministic = deterministic
         # Transitions requested per "collect" message. A batched worker drains its games to
         # learner decisions at the end of each message, which breaks up batches, so it gets
         # longer messages; it can return up to one extra row per game (one learner round).
@@ -395,10 +397,25 @@ class RolloutWorkers:
             c.send(msg)
         return [self._unwrap(c) for c in self.conns]
 
+    def capacity(self, steps: int) -> int:
+        """Most transitions ``collect(model, steps)`` can return (to size the buffer)."""
+        if self.deterministic:
+            return self.n * (-(-steps // self.n) + self.games - 1)
+        return steps + self.chunk_rows
+
     def collect(self, model: ActorCritic, steps: int) -> list[tuple[int, dict[str, Any]]]:
         """At least ``steps`` transitions as (env, segment), each env's in order. Env ids are
         ``worker * games_per_worker + game``."""
         self._broadcast("weights", _state(model))
+        if self.deterministic:  # a fixed share per worker, merged in worker order
+            share = -(-steps // self.n)
+            for c in self.conns:
+                c.send(("collect", share))
+            return [
+                (w * self.games + k, seg)
+                for w, c in enumerate(self.conns)
+                for k, seg in self._unwrap(c)
+            ]
         index = {c: i for i, c in enumerate(self.conns)}
         for c in self.conns:
             c.send(("collect", self.chunk_steps))

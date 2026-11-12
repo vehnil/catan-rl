@@ -98,6 +98,11 @@ class PPOConfig(_Strict):
     # >1: each worker runs this many games at once and batches their network decisions
     # (the learner's, and opponents' that share a model). Needs num_envs > 1.
     games_per_worker: int = Field(1, ge=1)
+    # True: every worker collects a fixed share of each rollout and the shares are merged in
+    # worker order, so a parallel run doesn't depend on timing (same config + seed + code ->
+    # same weights). Fast workers then wait for slow ones. False: hand out chunks as workers
+    # finish (faster; reproducible only up to chunk arrival order).
+    deterministic_collection: bool = False
 
     @model_validator(mode="after")
     def _check_games(self) -> PPOConfig:

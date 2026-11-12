@@ -529,7 +529,7 @@ def test_resume_single_env_matches_uninterrupted_run(tmp_path):
     a = load_policy(straight["policy_path"]).model.state_dict()
     b = load_policy(resumed["policy_path"]).model.state_dict()
     assert all(torch.equal(a[k], b[k]) for k in a)
-    drop = {"sps"}
+    drop = {"sps", "sps_recent", "time"}  # wall-clock fields
     rows_a = [
         {k: v for k, v in r.items() if k not in drop}
         for r in _rows(tmp_path / "a", straight["run_id"])
@@ -749,3 +749,82 @@ def test_ppo_train_with_games_per_worker(tmp_path):
     assert rows[-1]["steps"] >= 512 and rows[-1]["episodes"] > 0
     with pytest.raises(ValueError):
         TrainConfig.model_validate({"ppo": {"games_per_worker": 2}})  # needs num_envs > 1
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("games", [1, 3])
+def test_deterministic_collection_reproduces_parallel_runs(tmp_path, games):
+    import torch
+
+    from catan.agents.learned.ppo.trainer import train
+
+    def run(d):
+        cfg = TrainConfig.model_validate(
+            {
+                "data_dir": str(d),
+                "rules": {"max_turns_per_game": 30},
+                "ppo": {
+                    "total_steps": 384,
+                    "rollout_steps": 128,
+                    "minibatch": 64,
+                    "epochs": 2,
+                    "hidden": [32],
+                    "num_envs": 2,
+                    "games_per_worker": games,
+                    "deterministic_collection": True,
+                },
+                "league": {
+                    "fixed_opponents": ["random", "greedy:epsilon=0.5"],
+                    "latest_prob": 0.3,
+                    "snapshot_every": 128,
+                },
+                "eval_every": 200,
+                "eval_games": 2,
+            }
+        )
+        result = train(cfg, log=lambda *_: None)
+        timing = {"sps", "sps_recent", "time"}
+        rows = [{k: v for k, v in r.items() if k not in timing} for r in _rows(d, result["run_id"])]
+        return rows, load_policy(result["policy_path"]).model.state_dict()
+
+    rows_a, weights_a = run(tmp_path / "a")
+    rows_b, weights_b = run(tmp_path / "b")
+    assert rows_a == rows_b
+    assert all(torch.equal(weights_a[k], weights_b[k]) for k in weights_a)
+
+
+def test_provenance_records_code_and_config(tmp_path):
+    import subprocess
+
+    from catan.sim.provenance import config_hash, git_state, provenance
+
+    assert git_state(tmp_path)["commit"] is None  # not a repo
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "f.txt").write_text("x")
+    for args in (
+        ["add", "f.txt"],
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    clean = git_state(tmp_path)
+    assert clean["commit"] and clean["dirty"] is False
+    (tmp_path / "f.txt").write_text("y")
+    assert git_state(tmp_path)["dirty"] is True
+    assert config_hash({"a": 1, "b": 2}) == config_hash({"b": 2, "a": 1})
+    p = provenance({"a": 1}, tmp_path)
+    assert p["packages"]["torch"] and p["python"]
+
+
+@pytest.mark.slow
+def test_train_writes_provenance_and_timing(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+
+    quiet = lambda *_: None  # noqa: E731
+    first = train(_resume_cfg(tmp_path, 128), log=quiet)
+    prov = json.loads((tmp_path / "runs" / first["run_id"] / "provenance.json").read_text())
+    assert prov["config_hash"] and prov["resumes"] == []
+    train(_resume_cfg(tmp_path, 192), log=quiet, resume=first["run_id"])
+    prov = json.loads((tmp_path / "runs" / first["run_id"] / "provenance.json").read_text())
+    assert [r["at_step"] for r in prov["resumes"]] == [128]
+    rows = _rows(tmp_path, first["run_id"])
+    assert all(r["sps_recent"] > 0 and r["time"] > 1e9 for r in rows)

@@ -74,6 +74,9 @@ class PPOConfig(_Strict):
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
+    # Stop an update's epochs early once their mean KL from the rollout policy exceeds this.
+    target_kl: float | None = Field(None, gt=0)
+    lr_schedule: Literal["constant", "linear"] = "constant"  # linear: decay to 0 at total_steps
     hidden: list[int] = [512, 256]
     vp_reward_scale: float = 0.05
     # Bonus for winning sooner, linear from the full amount at turn 0 to 0 at fast_win_turns.

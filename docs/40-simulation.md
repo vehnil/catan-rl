@@ -106,6 +106,7 @@ Run with `uv run --no-editable catan …`.
 | `catan tournament experiments/<version>/x.yaml` | Tournament from a config |
 | `catan train experiments/v1_examples/ppo_small.yaml` | PPO training |
 | `catan curve <run> --vs name=a,b,c [--vs …]` | Evaluate a run's starting policy, checkpoints and final policy against fixed lineups (same games for each), to spot overfitting |
+| `catan health <run> [--windows N]` | Summarize a training run's PPO health metrics (entropy, explained variance, KL, clip fraction, value loss, grad norm) over windows, flagging warning signs |
 | `catan replay <file> [--step] [--seat N]` | Re-simulate, render, verify |
 | `catan view [file] [--port] [--no-open]` | Browser viewer for stored games |
 | `catan timeline <file> [-o out.json]` | Export a replay as per-step JSON |

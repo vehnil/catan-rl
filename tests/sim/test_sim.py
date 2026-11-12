@@ -414,3 +414,64 @@ def test_checkpoints_and_curve(tmp_path):
     lineups = {"rand": ["random"] * 3, "mixed": ["random", "random", "greedy"]}
     rows = evaluate_curve(ckpts, lineups, games=4, workers=1, rules=QUICK, data_dir=tmp_path)
     assert len(rows) == len(ckpts) * 2 and all(r["games"] == 4 for r in rows)
+
+
+def test_explained_variance_of_rollout():
+    import numpy as np
+
+    from catan.agents.learned.ppo.buffer import RolloutBuffer
+    from catan.agents.learned.ppo.trainer import _rollout_stats
+
+    buf = RolloutBuffer(4, 2, 2)
+    for v, r in [(0.0, 1.0), (0.0, -1.0), (0.0, 1.0), (0.0, -1.0)]:
+        buf.add(np.zeros(2), np.ones(2), 0, 0.0, v, r, 1.0)
+    buf.compute_returns({0: 0.0}, 0.99, 0.95)
+    assert _rollout_stats(buf)["explained_var"] == pytest.approx(0.0)  # predicts nothing
+    buf.values[:4] = buf.returns
+    assert _rollout_stats(buf)["explained_var"] == pytest.approx(1.0)  # predicts perfectly
+
+
+@pytest.mark.slow
+def test_target_kl_stops_epochs_early_and_lr_decays(tmp_path):
+    from catan.agents.learned.ppo.trainer import train
+
+    def run(**ppo):
+        cfg = {
+            "data_dir": str(tmp_path),
+            "rules": {"max_turns_per_game": 12},
+            "ppo": {
+                "total_steps": 192,
+                "rollout_steps": 64,
+                "minibatch": 16,
+                "epochs": 4,
+                "hidden": [32],
+                "lr": 1e-2,
+                **ppo,
+            },
+            "league": {"fixed_opponents": ["random"], "self_play_prob": 0},
+            "eval_every": 10_000,
+            "eval_games": 1,
+        }
+        result = train(TrainConfig.model_validate(cfg), log=lambda *_: None)
+        path = tmp_path / "runs" / result["run_id"] / "metrics.jsonl"
+        return [json.loads(line) for line in path.open()]
+
+    full = run()
+    assert all(r["epochs_run"] == 4 and r["lr"] == 1e-2 for r in full)
+    early = run(target_kl=1e-9, lr_schedule="linear")
+    assert all(r["epochs_run"] == 1 for r in early)
+    assert [r["lr"] for r in early] == pytest.approx([1e-2, 1e-2 * 2 / 3, 1e-2 / 3])
+
+
+def test_health_summary_flags_warning_signs():
+    from catan.sim.health import summarize
+
+    rows = [
+        {"steps": 100 * i, "explained_var": 0.5 if i < 5 else 0.02, "approx_kl": 0.01}
+        for i in range(1, 11)
+    ]
+    windows = summarize(rows, windows=2)
+    assert [w["steps"] for w in windows] == [500, 1000]
+    assert windows[0]["warnings"] == []
+    assert any("explained variance" in m for m in windows[1]["warnings"])
+    assert windows[0]["clip_frac"] is None  # older runs lack some columns

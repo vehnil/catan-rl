@@ -75,30 +75,59 @@ def _pin_policies(
 def _ppo_update(
     model: ActorCritic, opt: torch.optim.Optimizer, buf: RolloutBuffer, cfg, rng
 ) -> dict[str, float]:  # noqa: ANN001
-    stats = {"pg_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0, "clip_frac": 0.0}
+    stats = {
+        "pg_loss": 0.0,
+        "value_loss": 0.0,
+        "entropy": 0.0,
+        "approx_kl": 0.0,
+        "clip_frac": 0.0,
+        "grad_norm": 0.0,
+    }
     n = 0
+    epochs_run = 0
     model.train()
     for _ in range(cfg.epochs):
+        epoch_kl, epoch_n = 0.0, 0
         for mb in buf.minibatches(cfg.minibatch, rng, cfg.device):
             logp, ent, value = model.evaluate(mb["obs"], mb["masks"], mb["actions"])
-            ratio = (logp - mb["logprobs"]).exp()
+            log_ratio = logp - mb["logprobs"]
+            ratio = log_ratio.exp()
             adv = mb["advantages"]
             pg = -torch.min(ratio * adv, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * adv).mean()
             vloss = 0.5 * (value - mb["returns"]).pow(2).mean()
             loss = pg + cfg.value_coef * vloss - cfg.entropy_coef * ent.mean()
             opt.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
+            gnorm = nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
             opt.step()
             with torch.no_grad():
+                # Low-variance, non-negative KL estimate ((r - 1) - log r), as in the 37 PPO details.
+                kl = ((ratio - 1) - log_ratio).mean().item()
                 stats["pg_loss"] += pg.item()
                 stats["value_loss"] += vloss.item()
                 stats["entropy"] += ent.mean().item()
-                stats["approx_kl"] += (mb["logprobs"] - logp).mean().item()
+                stats["approx_kl"] += kl
                 stats["clip_frac"] += ((ratio - 1).abs() > cfg.clip).float().mean().item()
+                stats["grad_norm"] += float(gnorm)
+            epoch_kl += kl
+            epoch_n += 1
             n += 1
+        epochs_run += 1
+        if cfg.target_kl is not None and epoch_kl / max(epoch_n, 1) > cfg.target_kl:
+            break
     model.eval()
-    return {k: v / max(n, 1) for k, v in stats.items()}
+    out = {k: v / max(n, 1) for k, v in stats.items()}
+    out["epochs_run"] = epochs_run
+    return out
+
+
+def _rollout_stats(buf: RolloutBuffer) -> dict[str, float]:
+    """Explained variance of the value head on this rollout's returns: near 0 means the
+    advantages are mostly noise; 1 means the value predicts returns perfectly."""
+    values, returns = buf.values[: buf.ptr], buf.returns
+    var = float(np.var(returns))
+    ev = float("nan") if var == 0 else 1 - float(np.var(returns - values)) / var
+    return {"explained_var": ev, "value_mean": float(values.mean())}
 
 
 def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]:
@@ -167,6 +196,9 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
 
     try:
         while steps < p.total_steps:
+            if p.lr_schedule == "linear":
+                for g in opt.param_groups:
+                    g["lr"] = p.lr * max(0.0, 1 - steps / p.total_steps)
             buf.reset()
             if workers is not None:
                 before = steps
@@ -217,7 +249,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 with torch.no_grad():
                     last_values = {0: model(torch.as_tensor(obs).unsqueeze(0))[1].item()}
             buf.compute_returns(last_values, p.gamma, p.gae_lambda)
-            upd = _ppo_update(model, opt, buf, p, rng)
+            upd = {**_rollout_stats(buf), **_ppo_update(model, opt, buf, p, rng)}
             ce = cfg.checkpoint_every
             if ce and steps // ce > checkpointed // ce:
                 ckpt, _ = save_policy(
@@ -239,6 +271,7 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
                 "turns_100": float(np.mean(recent_turns)) if recent_turns else None,
                 "sps": steps / (time.perf_counter() - t0),
                 "snapshots": len(league.snapshots) if workers is None else workers.snapshots,
+                "lr": opt.param_groups[0]["lr"],
                 **upd,
                 **last_eval,
             }
@@ -247,7 +280,8 @@ def train(cfg: TrainConfig, log: Callable[[str], Any] = print) -> dict[str, Any]
             metrics_file.flush()
             log(
                 f"steps {steps:>8} ep {episodes:>5} win100 {row['win_rate_100'] or 0:.2f} "
-                f"ent {upd['entropy']:.2f} kl {upd['approx_kl']:.4f} sps {row['sps']:.0f}"
+                f"ent {upd['entropy']:.2f} kl {upd['approx_kl']:.4f} clip {upd['clip_frac']:.2f} "
+                f"ev {upd['explained_var']:.2f} sps {row['sps']:.0f}"
             )
 
         final_eval = run_eval(cfg.seed + 10**6)

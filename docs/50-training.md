@@ -16,12 +16,16 @@ The trainer runs the learner in `CatanSingleAgentEnv`, draws opponents from the 
 ### Loop
 1. Collect `rollout_steps` learner decisions in the single-agent env. Opponents are resampled from the league every episode: each seat is a past snapshot with probability `self_play_prob`, otherwise a fixed spec. Illegal actions are masked.
 2. On truncation, bootstrap with γ·V(s′) rather than treating the turn cap as a loss.
-3. GAE → clipped PPO update for `epochs` × minibatches, with entropy bonus, value loss and gradient clipping.
+3. GAE → clipped PPO update for `epochs` × minibatches, with entropy bonus, value loss and gradient clipping. With `target_kl` set, the remaining epochs are skipped once an epoch's mean KL exceeds it.
 4. Every `snapshot_every` steps, freeze a copy of the learner into the league (keeping the last `max_snapshots`).
 5. Every `eval_every` steps, play `eval_games` against `eval_opponents`, rotating the learner through all 4 seats.
 6. At the end: a final evaluation, then the policy is saved to `data/policies/<id>` and registered in the store with lineage (`parent_id` if warm-started via `init_policy`).
 
-Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate, return and game length (turns) over the last 100 games, steps/sec, losses, entropy, approx KL, clip fraction, and the latest eval.
+Metrics per update go to `data/runs/<run_id>/metrics.jsonl`: steps, episodes, win rate, return and game length (turns) over the last 100 games, steps/sec, learning rate, losses, entropy, approx KL (the `(r − 1) − log r` estimator), clip fraction, gradient norm (before clipping), epochs run, and the latest eval. Two rollout statistics:
+- **`explained_var`:** `1 − Var(returns − V) / Var(returns)`. This is the main health check: near 0 means the value head predicts nothing, so the advantages are mostly noise.
+- **`value_mean`:** the mean value prediction.
+
+`catan health <run>` averages these over windows of updates and flags warning signs (explained variance < 0.1, KL > 0.05, clip fraction > 0.3).
 
 ### Config (`TrainConfig`, YAML)
 
@@ -33,6 +37,8 @@ Full example: [`experiments/v1_examples/ppo_league.yaml`](../experiments/v1_exam
 | `ppo.gamma` | 0.995 | Games are long (~60+ turns, hundreds of decisions) |
 | `ppo.vp_reward_scale` | 0.05 | Dense ΔVP shaping on top of the ±1 outcome |
 | `ppo.num_envs` | 1 | Parallel rollout workers; see below |
+| `ppo.target_kl` | null | Stop an update's epochs early once their mean KL exceeds this |
+| `ppo.lr_schedule` | constant | `linear` decays the learning rate to 0 at `total_steps`, standard for long runs |
 | `ppo.fast_win_bonus` / `fast_win_turns` | 0 / 200 | Extra reward for a win, linear from the full bonus at turn 0 to 0 at `fast_win_turns`; losses get none |
 | `league.fixed_opponents` | `[random, greedy]` | Non-snapshot opponent pool. `policy:<ref>` entries are pinned to a policy id at start, loaded once and kept frozen |
 | `league.self_play_prob` | 0.5 | P(an opponent seat is a past snapshot) |

@@ -299,6 +299,29 @@ def curve(
 
 
 @app.command()
+def health(
+    run: Annotated[str, typer.Argument(help="Run id, or a training config name (newest run).")],
+    windows: int = 10,
+    data_dir: DataOpt = "data",
+) -> None:
+    """Summarize a training run's PPO health metrics and flag warning signs."""
+    from catan.sim.health import COLUMNS, run_metrics, summarize
+    from catan.sim.store import Store
+
+    with Store(Path(data_dir) / "catan.db") as store:
+        run_id, rows = run_metrics(store, run, data_dir)
+    summary = summarize(rows, windows)
+    typer.echo(f"run {run_id}: {len(rows)} updates")
+    table = [
+        {k: ("-" if v is None else v) for k, v in w.items() if k != "warnings"} for w in summary
+    ]
+    typer.echo(_table(table, ["steps", *COLUMNS]))
+    for w in summary:
+        for msg in w["warnings"]:
+            typer.echo(f"  @ {w['steps']}: {msg}")
+
+
+@app.command()
 def benchmark(games: int = 50, agent: str = "random", workers: int = 1) -> None:
     """Measure engine + agent throughput (games/min)."""
     from catan.sim.runner import Matchup, run_matchups

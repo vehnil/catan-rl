@@ -22,6 +22,12 @@ What the experiments so far (v2–v5, see [experiments/README.md](../experiments
 11. **The overfitting curve shows only mild specialisation, starting around 400k steps.** Checkpoints every 200k were scored against the peers, held-out PPO policies, a greedy mix and 3× random on fixed seeds (`catan curve`). Held-out PPO scores rose from 2–12% to 25–48%, and 3× random stayed at 97–100%. Two of four learners (s1, s3) flattened against held-out PPO after about 400k while their peers score kept rising, which suggests stages of about 400–600k against a fixed population, then refreshing the population.
 12. **Seed matters as much as settings.** In v6 stage 1, four seeds with identical settings spread as widely as v5's four different settings, and v5 C's round-robin lead (40%) didn't reproduce (8–19%). Compare settings over several seeds, never one.
 
+13. **The failed greedy stages had healthy update sizes but almost nothing to learn from** (`catan health`, run after the fact). In v3 stage 2 and v4 stage 3:
+    - KL (about 0.01) and clip fraction (0.10–0.14) were normal, the same as successful runs.
+    - Value loss fell to 0.001–0.003, a third or less of a successful run's (about 0.008 in v6 stage 2), while returns sat near −0.8.
+
+    The value head learned "I lose" accurately, so the advantages were tiny. Per-rollout advantage normalisation then scales that near-noise up to full-size updates, which fits the policy drifting rather than improving: v4 stage 3's entropy rose from 1.11 to 1.44. Explained variance wasn't logged then; it is now, so future runs can confirm this directly.
+
 ## Hypotheses, and what other work suggests
 
 **H1. Rewards that still carry information when losing.** Our reward is ±1 at the end plus a small amount per VP. Against stronger opponents nearly every game is −1, so learning stops (findings 2 and 4).

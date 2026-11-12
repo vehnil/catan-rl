@@ -30,6 +30,7 @@ from catan.engine.state import RulesConfig
 from catan.env.gym_single import CatanSingleAgentEnv
 from catan.player.features import FEATURE_DIM
 from catan.sim.artifacts import load_policy, read_manifest, resolve_policy_path, save_policy
+from catan.sim.provenance import provenance
 from catan.sim.store import Store
 
 
@@ -139,6 +140,18 @@ def _save_state(path: Path, state: dict[str, Any]) -> None:
     tmp.replace(path)  # atomic: a crash mid-write leaves the previous state intact
 
 
+def _record_provenance(run_dir: Path, config: dict[str, Any], resumed_at: int | None) -> None:
+    """``provenance.json``: what produced the run, plus one entry per resume."""
+    path = run_dir / "provenance.json"
+    prov = provenance(config)
+    if resumed_at is None or not path.exists():
+        path.write_text(json.dumps({**prov, "resumes": []}, indent=2))
+        return
+    old = json.loads(path.read_text())
+    old.setdefault("resumes", []).append({**prov, "at_step": resumed_at})
+    path.write_text(json.dumps(old, indent=2))
+
+
 def train(
     cfg: TrainConfig, log: Callable[[str], Any] = print, resume: str | None = None
 ) -> dict[str, Any]:
@@ -175,6 +188,7 @@ def train(
         metrics_path.write_text("".join(line + "\n" for line in kept))
     metrics_file = metrics_path.open("a")
     log(f"run {run_id}: metrics -> {metrics_path}")
+    _record_provenance(run_dir, cfg.model_dump(), None if saved is None else saved["steps"])
     if saved is not None:
         log(f"  resuming at step {saved['steps']}")
 
@@ -219,10 +233,11 @@ def train(
             worker_seed,
             data_dir,
             p.games_per_worker,
+            p.deterministic_collection,
         )
         for snap in saved["snapshots"] if saved is not None else []:
             workers.add_snapshot_state(snap)
-        buf = RolloutBuffer(p.rollout_steps + workers.chunk_rows, FEATURE_DIM, NUM_ACTIONS)
+        buf = RolloutBuffer(workers.capacity(p.rollout_steps), FEATURE_DIM, NUM_ACTIONS)
     else:
         buf = RolloutBuffer(p.rollout_steps, FEATURE_DIM, NUM_ACTIONS)
         if saved is None:
@@ -260,6 +275,7 @@ def train(
         history = [saved["last_row"]] if saved["last_row"] else []
         torch.set_rng_state(saved["torch_rng"])
     t_steps = steps  # steps/sec counts from here
+    t_prev, steps_prev = time.perf_counter(), steps  # for the per-update rate
 
     try:
         while steps < p.total_steps:
@@ -338,11 +354,14 @@ def train(
                 "return_100": float(np.mean(recent_returns)) if recent_returns else None,
                 "turns_100": float(np.mean(recent_turns)) if recent_turns else None,
                 "sps": (steps - t_steps) / (time.perf_counter() - t0),
+                "sps_recent": (steps - steps_prev) / (time.perf_counter() - t_prev),
+                "time": time.time(),
                 "snapshots": len(league.snapshots) if workers is None else workers.snapshots,
                 "lr": opt.param_groups[0]["lr"],
                 **upd,
                 **last_eval,
             }
+            t_prev, steps_prev = time.perf_counter(), steps
             history.append(row)
             metrics_file.write(json.dumps(row) + "\n")
             metrics_file.flush()

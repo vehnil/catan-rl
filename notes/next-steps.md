@@ -9,16 +9,21 @@ A critique against standard RL practice found that v2–v6 trained far too brief
 - [x] **PPO health:** explained variance, a better KL estimator, grad norm, `target_kl`, linear LR decay, `catan health`. The retroactive check is [findings.md](findings.md) 13.
 - [x] **Resumable long runs:** `train_state.pt` at each checkpoint, `catan train --resume`.
 - [x] **Evaluation protocol:** VP margin and rank as primary metrics, the `catan rate` reference rating, `catan compare` across seeds, `#argmax` policies. The protocol is in `experiments/README.md`.
-- [ ] **v7 baseline:** continuous self-play against the current policy plus a 40-snapshot history plus 20% fixed opponents, 20M steps × 3 seeds, overnight. Discuss before anything else.
+- [x] **v7 baseline:** continuous self-play against the current policy plus a 40-snapshot history plus 20% fixed opponents, 20M steps × 3 seeds. Beat v6 stage 2; still far from greedy ([findings](findings.md) 14–19).
+- [x] **Experiment runner** (`catan experiment run | watch | status | stop`):
+  - unattended, detached runs from a frozen code snapshot, with auto-resume after crashes;
+  - analysis and `report.md` at the end;
+  - a live dashboard;
+  - provenance per run, and `ppo.deterministic_collection` for exact parallel reproducibility.
 - [ ] **Before v7's verdict** (see [drawing-board](drawing-board.md)):
   - Greedy vs 3× greedy, 400 games: the margin, rank and win rate that "as good as greedy" actually means.
   - Pace at each checkpoint: game length against 3× greedy and the learner's VP when greedy wins.
   - Explained variance on the greedy eval games, not just in training.
   - The s1 checkpoints at 200 games, to check whether s1 stalled.
-- [ ] **Opponent-mix arm:** v7 with random dropped from the fixed pool and greedy plus `greedy:epsilon=0.5` raised to about 30–40% of seats (full greedy is about 7% in v7). Config only.
+- [ ] **v8 opponent mix** ([v8-proposal](../experiments/v8_continuation/v8-proposal.md)): v7 continued 5M steps with random dropped from the fixed pool and greedy plus `greedy:epsilon=0.5` raised to about 30–40% of seats (full greedy is about 7% in v7). Config only.
 - [ ] **Screen new arms at 5M** against v7's own 5M checkpoints; only arms that beat it get 20M × 3 seeds.
-- [ ] **v8 reward:** rank reward against win/loss on the v7 setup, 3 seeds each.
-- [ ] **v9 network:** per-vertex features, then a board-aware (graph) network, against the v7 baseline.
+- [ ] **Rank reward:** rank reward against win/loss on the v7 setup, 3 seeds each.
+- [ ] **Board-aware network:** per-vertex features, then a board-aware (graph) network, against the v7 baseline.
 - [ ] Maybe: PFSP opponent sampling (favour snapshots the learner loses to), if v7's uniform pool plateaus.
 
 ## Earlier: ground-up ladders (no imitation)

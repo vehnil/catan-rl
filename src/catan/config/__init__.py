@@ -1,6 +1,11 @@
 from catan.config.models import (
+    AnalysisSpec,
+    CompareSpec,
+    CurveSpec,
+    ExperimentConfig,
     LeagueConfig,
     PPOConfig,
+    RateSpec,
     ReferenceConfig,
     RulesModel,
     TournamentConfig,
@@ -9,8 +14,13 @@ from catan.config.models import (
 )
 
 __all__ = [
+    "AnalysisSpec",
+    "CompareSpec",
+    "CurveSpec",
+    "ExperimentConfig",
     "LeagueConfig",
     "PPOConfig",
+    "RateSpec",
     "ReferenceConfig",
     "RulesModel",
     "TournamentConfig",

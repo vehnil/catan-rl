@@ -217,6 +217,7 @@ def train(
         "vp_reward_scale": p.vp_reward_scale,
         "fast_win_bonus": p.fast_win_bonus,
         "fast_win_turns": p.fast_win_turns,
+        "terminal_reward": p.terminal_reward,
     }
     workers = None
     ep_return = 0.0

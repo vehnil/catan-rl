@@ -43,6 +43,7 @@ class CatanSingleAgentEnv(gym.Env):
         vp_reward_scale: float = 0.0,
         fast_win_bonus: float = 0.0,
         fast_win_turns: int = 200,
+        terminal_reward: str = "win",
     ) -> None:
         self.opponents_factory = opponents
         self.config = config or RulesConfig()
@@ -54,6 +55,10 @@ class CatanSingleAgentEnv(gym.Env):
         # Only wins get it, so there is no incentive to lose quickly.
         self.fast_win_bonus = fast_win_bonus
         self.fast_win_turns = fast_win_turns
+        # "win": win_reward or loss_reward at the end. "rank": linear in finishing place, from
+        # win_reward for 1st to loss_reward for last, so a close 2nd beats a distant 4th.
+        assert terminal_reward in ("win", "rank"), terminal_reward
+        self.terminal_reward = terminal_reward
         self.observation_space = spaces.Box(-np.inf, np.inf, (FEATURE_DIM,), np.float32)
         self.action_space = spaces.Discrete(NUM_ACTIONS)
         self.game: Game | None = None
@@ -107,10 +112,28 @@ class CatanSingleAgentEnv(gym.Env):
         terminated = state.done and not state.truncated
         truncated = state.truncated
         if state.done and state.winner >= 0:
-            reward += self.win_reward if state.winner == self.seat else self.loss_reward
+            if self.terminal_reward == "rank":
+                reward += self._rank_reward()
+            else:
+                reward += self.win_reward if state.winner == self.seat else self.loss_reward
             if state.winner == self.seat and self.fast_win_bonus:
                 reward += self.fast_win_bonus * max(0.0, 1 - state.turn / self.fast_win_turns)
         return self._features(), float(reward), terminated, truncated, self._info()
+
+    def _rank_reward(self) -> float:
+        """Reward for the learner's finishing place: the winner is 1st, the others are placed
+        by total VP, and tied seats share the average of their places."""
+        assert self.game is not None
+        state = self.game.state
+        place = 0.0  # 0 = 1st
+        if state.winner != self.seat:
+            mine = state.total_vp(self.seat)
+            rest = [
+                state.total_vp(p) for p in range(NUM_PLAYERS) if p not in (self.seat, state.winner)
+            ]
+            place = 1 + sum(v > mine for v in rest) + 0.5 * sum(v == mine for v in rest)
+        frac = place / (NUM_PLAYERS - 1)
+        return self.win_reward + (self.loss_reward - self.win_reward) * frac
 
     def action_masks(self) -> np.ndarray:
         assert self._obs is not None

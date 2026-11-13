@@ -20,10 +20,10 @@ A critique against standard RL practice found that v2–v6 trained far too brief
   - Pace at each checkpoint: game length against 3× greedy and the learner's VP when greedy wins.
   - Explained variance on the greedy eval games, not just in training.
   - The s1 checkpoints at 200 games, to check whether s1 stalled.
-- [ ] **v8 opponent mix** ([v8-proposal](../experiments/v8_continuation/v8-proposal.md)): v7 continued 5M steps with random dropped from the fixed pool and greedy plus `greedy:epsilon=0.5` raised to about 30–40% of seats (full greedy is about 7% in v7). Config only.
+- [x] **v8 opponent mix** ([v8-proposal](../experiments/v8_continuation/v8-proposal.md)): v7 continued 5M steps, control vs greedy-heavy. No difference between arms, and neither beat v7: v7 had plateaued, and greedy exposure isn't the limit ([findings](findings.md) 20–23). Next: the board-aware network.
+- [ ] **Board-aware network (main line after v8):** per-vertex features, then a board-aware (graph) network, against the v7 baseline at matched steps (its 5M and 10M checkpoints).
 - [ ] **Screen new arms at 5M** against v7's own 5M checkpoints; only arms that beat it get 20M × 3 seeds.
-- [ ] **Rank reward:** rank reward against win/loss on the v7 setup, 3 seeds each.
-- [ ] **Board-aware network:** per-vertex features, then a board-aware (graph) network, against the v7 baseline.
+- [ ] **v9 rank reward** ([v9-proposal](../experiments/v9_rank_reward/v9-proposal.md)): rank reward against win/loss on the v7 setup, 20M × 3 seeds from scratch, with v7 as the matched control. Running overnight 12–13 Nov 2026.
 - [ ] Maybe: PFSP opponent sampling (favour snapshots the learner loses to), if v7's uniform pool plateaus.
 
 ## Earlier: ground-up ladders (no imitation)

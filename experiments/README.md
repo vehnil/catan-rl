@@ -355,4 +355,15 @@ catan experiment watch v8_continuation
 
 `smoke_experiment.yaml` is a few-minute end-to-end check of the same setup.
 
-Results: not run yet.
+Results (12 Nov 2026, 3 h 8 min of training + 33 min of analysis): **no detectable difference between the arms, and neither improved on v7.** Paired by seed, greedy-heavy minus control was +0.16, −0.24 and +0.19 VP against 3× greedy (mean +0.04). The control lost 0.20 VP against v7's finals (0.51 in 2 random + greedy). Health was normal in both arms. Details in [v8-proposal.md](v8_continuation/v8-proposal.md#results) and [findings](../notes/findings.md) 20–23.
+
+### v9_rank_reward: rank reward vs win/loss
+
+Does paying the end-of-game reward by finishing place (1st +1, 2nd +⅓, 3rd −⅓, 4th −1) train a stronger policy than win/loss? v7's setup from scratch, 20M steps × 3 seeds, with `ppo.terminal_reward: rank` as the only change. The control is v7 itself at matched steps, so there are no control runs. The hypothesis, design and decision rule are in [v9_rank_reward/v9-proposal.md](v9_rank_reward/v9-proposal.md).
+
+```bash
+catan experiment run experiments/v9_rank_reward/experiment.yaml   # all three runs, then the analysis
+catan experiment watch v9_rank_reward
+```
+
+`smoke_experiment.yaml` is a few-minute end-to-end check of the same setup.

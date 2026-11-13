@@ -1,0 +1,39 @@
+# Run with: catan experiment run experiments/v9_rank_reward/experiment.yaml
+# Watch:    catan experiment watch v9_rank_reward
+# The hypothesis, design and decision rule are in v9-proposal.md.
+name: v9_rank_reward
+description: >
+  Does paying the end-of-game reward by finishing place (1st +1, 2nd +1/3, 3rd -1/3,
+  4th -1) instead of win/loss train a stronger policy? v7's setup from scratch, 20M steps,
+  three seeds; the only change is the reward. The control is v7 at matched steps.
+comparison: >
+  Primary: VP margin against 3x greedy (400 games per final), paired by seed, rank minus
+  the v7 final. Better = all three differences positive and mean >= +0.3 VP; worse = all
+  three negative and mean <= -0.3 VP; otherwise no detectable difference. Secondary: mean
+  rank, win rate and mean VP against 3x greedy; reference rating and the greedy3 curve
+  against v7's at matched steps (5M screen); 2 random + greedy margin.
+runs: [rank_s1.yaml, rank_s2.yaml, rank_s3.yaml]
+max_resumes: 3
+analysis:
+  health: true
+  curve:
+    every: 2000000
+    games: 200
+    seed: 5000
+    lineups:
+      greedy3: [greedy, greedy, greedy]
+      mix: [random, random, greedy]
+  rate:
+    reference: experiments/reference.yaml
+    every: 2000000
+    games: 400
+  compare:
+    groups:
+      rank: self
+      v7: [d05773d2be, 5afc035651, 159e1632e3]
+    lineups:
+      greedy3: [greedy, greedy, greedy]
+      mix: [random, random, greedy]
+    games: 400
+    seed: 6000
+  workers: 8

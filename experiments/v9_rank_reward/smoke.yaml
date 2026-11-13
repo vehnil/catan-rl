@@ -1,0 +1,29 @@
+# Short check of the v9 setup: rank reward from scratch, snapshots, evals and checkpoints.
+# Not part of v9's results.
+name: v9_smoke
+seed: 59
+ppo:
+  total_steps: 100000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  lr_schedule: linear
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  terminal_reward: rank
+  entropy_coef: 0.01
+  num_envs: 2
+  games_per_worker: 32
+  deterministic_collection: true
+league:
+  fixed_opponents: [random, "greedy:epsilon=0.5", greedy]
+  lineup: false
+  latest_prob: 0.5
+  self_play_prob: 0.6
+  snapshot_every: 25000
+  max_snapshots: 40
+eval_every: 50000
+eval_games: 20
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 50000

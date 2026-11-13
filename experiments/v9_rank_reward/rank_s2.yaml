@@ -1,0 +1,30 @@
+# v9 rank reward: v7_baseline_s2 exactly, from scratch, except the end-of-game reward pays
+# by finishing place (1st +1, 2nd +1/3, 3rd -1/3, 4th -1) instead of +1 / -1.
+# The control is v7 itself, same seed, at matched steps. See v9-proposal.md.
+name: v9_rank_s2
+seed: 51
+ppo:
+  total_steps: 20000000
+  rollout_steps: 4096
+  minibatch: 512
+  epochs: 4
+  lr: 0.00025
+  lr_schedule: linear
+  hidden: [512, 256]
+  vp_reward_scale: 0.05
+  terminal_reward: rank
+  entropy_coef: 0.01
+  num_envs: 2
+  games_per_worker: 32  # as v7; 64 is faster but would change the collected data
+  deterministic_collection: true  # same data as v7's setting, but reproducible
+league:
+  fixed_opponents: [random, "greedy:epsilon=0.5", greedy]  # pool: each fixed seat drawn uniformly
+  lineup: false
+  latest_prob: 0.5
+  self_play_prob: 0.6  # of the remaining seats, once snapshots exist
+  snapshot_every: 500000
+  max_snapshots: 40
+eval_every: 1000000
+eval_games: 100
+eval_opponents: [greedy, greedy, greedy]
+checkpoint_every: 1000000  # policy + resumable train state

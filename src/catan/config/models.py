@@ -93,6 +93,9 @@ class PPOConfig(_Strict):
     # Bonus for winning sooner, linear from the full amount at turn 0 to 0 at fast_win_turns.
     fast_win_bonus: float = 0.0
     fast_win_turns: int = Field(200, ge=1)
+    # End-of-game reward. win: +1 / -1. rank: by finishing place, 1st +1, 2nd +1/3, 3rd -1/3,
+    # 4th -1 (the winner is 1st, the rest by total VP; ties share the average place).
+    terminal_reward: Literal["win", "rank"] = "win"
     device: str = "cpu"
     num_envs: int = Field(1, ge=1)  # >1: one env + policy copy per worker process
     # >1: each worker runs this many games at once and batches their network decisions

@@ -323,6 +323,70 @@ def test_fast_win_bonus_only_rewards_wins():
     assert seen == {True, False}
 
 
+@pytest.mark.parametrize(
+    "winner, vps, reward",
+    [
+        (0, [10, 9, 9, 9], 1.0),  # learner wins
+        (1, [9, 10, 5, 3], 1 / 3),  # 2nd
+        (1, [5, 10, 9, 3], -1 / 3),  # 3rd
+        (1, [3, 10, 9, 5], -1.0),  # 4th
+        (1, [6, 10, 6, 2], 0.0),  # tied for 2nd/3rd: the average
+        (1, [4, 10, 4, 4], -1 / 3),  # three-way tie for 2nd-4th
+        (2, [10, 7, 10, 2], 1 / 3),  # same VP as the winner still ranks below it
+    ],
+)
+def test_rank_reward_pays_by_finishing_place(monkeypatch, winner, vps, reward):
+    from catan.env.gym_single import CatanSingleAgentEnv
+
+    env = CatanSingleAgentEnv(
+        opponents=lambda: [make_agent("random") for _ in range(3)],
+        config=QUICK,
+        learner_seat=0,
+        terminal_reward="rank",
+    )
+    env.reset(seed=0)
+    state = env.game.state
+    monkeypatch.setattr(state, "winner", winner)
+    monkeypatch.setattr(type(state), "total_vp", lambda self, p: vps[p])
+    assert env._rank_reward() == pytest.approx(reward)
+
+
+def test_rank_reward_changes_only_the_final_reward():
+    import numpy as np
+
+    from catan.env.gym_single import CatanSingleAgentEnv
+
+    def episode(seed, mode):  # random learner vs greedy, so games finish and the learner loses
+        env = CatanSingleAgentEnv(
+            opponents=lambda: [make_agent("greedy") for _ in range(3)],
+            config=QUICK,
+            learner_seat=0,
+            vp_reward_scale=0.05,
+            terminal_reward=mode,
+        )
+        _, info = env.reset(seed=seed)
+        rng, rewards = np.random.default_rng(seed), []
+        while True:
+            a = int(rng.choice(np.flatnonzero(info["action_mask"])))
+            _, r, term, trunc, info = env.step(a)
+            rewards.append(r)
+            if term or trunc:
+                return rewards, info, env
+
+    finished = 0
+    for seed in range(5):
+        win, info, _ = episode(seed, "win")
+        rank, _, env = episode(seed, "rank")
+        assert win[:-1] == rank[:-1]
+        if info.get("winner", -1) < 0:  # truncated: no end-of-game reward either way
+            assert win[-1] == rank[-1]
+            continue
+        finished += 1
+        terminal = 1.0 if info["winner"] == 0 else -1.0
+        assert rank[-1] - env._rank_reward() == pytest.approx(win[-1] - terminal)
+    assert finished > 0
+
+
 def test_league_loads_stored_policy_opponents_once(tmp_path):
     import numpy as np
 

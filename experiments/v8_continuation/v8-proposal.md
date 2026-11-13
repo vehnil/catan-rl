@@ -70,8 +70,32 @@ With three seeds a t-interval is very wide, so this sign-and-size rule is fixed 
 
 ## Cost
 
-6 runs at once (12 workers on the M1's 8 cores). Expect about 8–10 hours, plus about an hour of analysis; `catan experiment watch v8_continuation` shows the real ETA.
+6 runs at once (12 workers on the M1's 8 cores). Estimated beforehand at 8–10 hours plus about an hour of analysis. **Actual: 3 h 8 min of training (15:41–18:50) and 33 min of analysis**, with no crashes or resumes. Each run got 530–660 steps/s, faster than the estimate assumed, because a 5M-step run only fills about 10 snapshots.
 
 ## Results
 
-Not run yet.
+Run 12 Nov 2026, code `aa62343`. Full report: `data/experiments/v8_continuation/report.md`.
+
+**Verdict: no detectable difference between the arms, and neither arm improved on v7.** This is the "neither arm moves, control flat" row: neither more steps nor more greedy opponents improve this setup, so the main line moves to the network (H4).
+
+VP margin against 3× greedy, 400 games per final, same games for every policy:
+
+| Seed | v7 final (start) | Control | Greedy-heavy | Greedy − control | Control − v7 |
+|---|---|---|---|---|---|
+| s1 | −5.70 | −5.88 | −5.73 | +0.16 | −0.18 |
+| s2 | −5.45 | −5.73 | −5.96 | −0.24 | −0.28 |
+| s3 | −5.67 | −5.82 | −5.63 | +0.19 | −0.14 |
+| **Mean** | **−5.61** | **−5.81** | **−5.77** | **+0.04** | **−0.20** |
+
+- **Primary (greedy-heavy vs control):** the paired differences have mixed signs, with a mean of +0.04. That's no detectable difference by the rule set beforehand.
+- **Control vs v7 finals:** all three seeds lost ground against 3× greedy (−0.20 on average, short of the −0.3 "worse" bar). In the 2 random + greedy lineup all three lost 0.44–0.58 VP (mean −0.51), which meets the "worse" rule. 5M more steps at a live learning rate made the policy slightly worse, not better.
+- **Reference rating:** flat. The starts were 28.7–30.8; the finals range from 28.5 to 33.3 with no pattern by arm. Checkpoints in between wander within about ±3 points, which is the noise level (finding 16).
+- **Rank, win rate, mean VP against 3× greedy:** no differences between arms (rank 3.51–3.52, wins 1.2%, VP 4.26–4.30), and all slightly below v7 (3.47, 1.8%, 4.44).
+- **Health:** normal throughout in both arms (explained variance 0.84–0.87, KL about 0.005). The greedy arm's training win rate was 0.08 for the first 500k (before any snapshots existed), then 0.13–0.15. The stop rule never triggered, and value loss stayed at about 0.007, with no "I lose" collapse.
+
+**What it answers:**
+1. *Opponent mix:* tripling the share of greedy seats (7% → 24%, plus 12% `ε=0.5`) for 5M steps didn't improve play against greedy. Exposure to greedy isn't what limits the learner.
+2. *Steps with a live learning rate:* no gain, and a small loss. v7 had already plateaued by its end. Its decay to a learning rate of 0 wasn't hiding further progress; if anything, the anneal settled the policy, and restarting at 1e-4 made it drift.
+3. *Finding 2 risk:* didn't repeat. With most seats still the learner's own copies, training against greedy neither helped nor broke the policy.
+
+**Caveat:** 5M steps is a quarter of v7. A slow effect, at v7's own rate of about 0.08 VP per 1M, would be about +0.4 VP over 5M and might not show yet. But the control should then have gained too, and it lost ground instead.

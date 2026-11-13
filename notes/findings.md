@@ -1,6 +1,6 @@
 # Findings and hypotheses
 
-What the experiments so far (v2–v7, see [experiments/README.md](../experiments/README.md)) have shown, what we think is going on, and what other Catan and multi-agent RL work suggests trying. Started after v5 stage 1, Nov 2026; findings 14–19 are from the v7 baseline.
+What the experiments so far (v2–v7, see [experiments/README.md](../experiments/README.md)) have shown, what we think is going on, and what other Catan and multi-agent RL work suggests trying. Started after v5 stage 1, Nov 2026; findings 14–19 are from the v7 baseline, 20–23 from v8.
 
 ## Findings
 
@@ -76,6 +76,21 @@ What the experiments so far (v2–v7, see [experiments/README.md](../experiments
     - Per-seed throughput was about 650 steps/s early in the run and about 450 by the end.
     - The machine load was unchanged, so the drop followed the pool filling toward 40 snapshots: more distinct opponent models means smaller batched-inference groups per worker.
     - Earlier, the encoding and batching work (perf A+B) gave 1.69× on a controlled re-run of v6 stage 2: 288 → 505 steps/s per learner.
+
+20. **Greedy as an opponent: equal strength isn't a margin of 0.** Greedy against 3× greedy (400 games) scores a VP margin of −2.18, mean rank 2.35 (ties lower it from 2.5), a 25% win rate and 7.26 VP, in games of 81.9 turns. So v7's −5.61 is a gap of about 3.4 VP to greedy's level, not 5.6. Games with only greedy players also last as long as v7's games against 3× greedy (72–81 turns): game length is set by greedy and says nothing about the learner's pace.
+
+21. **v7 had plateaued: 5M more steps at a live learning rate made it slightly worse** (v8 control). Continuing each v7 final under v7's own setup at a constant learning rate of 1e-4 lost ground in all three seeds: −0.20 VP on average against 3× greedy and −0.51 in the 2 random + greedy lineup (400 games, same games for every policy). The reference rating stayed flat within its ±3 noise. Health was normal throughout. v7's late gains had already stopped (finding 16), and its learning-rate decay to 0 wasn't hiding further progress; restarting the rate made the policy drift instead.
+
+22. **Training against greedy more often doesn't help against greedy** (v8 greedy-heavy). Raising greedy seats from about 7% to 24% (plus 12% `greedy:epsilon=0.5`, no random) for 5M steps gave no detectable difference from the control: paired by seed, +0.16, −0.24 and +0.19 VP against 3× greedy (mean +0.04). Rank, win rate and mean VP matched the control too. The hypothesis that v7 was held back by rarely meeting greedy is not supported.
+
+23. **With self-play in the mix, training against greedy no longer breaks the policy.** Unlike v3 and v4 (findings 2 and 13), the greedy-heavy arm kept a 13–15% training win rate once snapshots existed (8% before), value loss stayed at about 0.007, and the policy didn't get worse than the control. Having most seats still be the learner's own copies keeps the reward informative, but it doesn't make greedy teachable either.
+
+24. **The M1 tops out at about 8 rollout workers, and Python game code dominates each step** (profiled 12 Nov 2026, one `_BatchActor` with v7's settings and 32 games, the v7 s1 final as the learner).
+    - Aggregate throughput with N workers at once: 1 → 1,221 steps/s, 4 → 3,315, 6 → 3,708, **8 → 4,243, 12 → 4,216**. v8 ran 12 workers (6 runs × 2) and gained nothing from the last 4, while using most of the 16 GB of memory.
+    - The snapshot pool costs less than finding 19 suggested: 14% alone (1,233 → 1,056 steps/s at pool 0 vs 40) and 20% with 8 workers at once (5,052 → 4,019). Bigger pools mean smaller batches: the learner's mean batch falls from 18 games to 4.
+    - Where a worker's time goes (cProfile, pool 10): feature encoding about 19% (3.3 encodes per learner step, since each network opponent encodes its own view), observations and belief tracking about 17%, the rules engine 15–20%, greedy's move search about 10%, network inference about 12%. About 85% is Python game, feature and belief code.
+    - **`games_per_worker: 64` is about 1.35–1.4× faster than v7/v8's 32** (8 workers at once): 4,303 → 5,731 steps/s at pool 10, and 3,816 → 5,436 at pool 40. The learner's mean batch jumps from about 9–10 games to 33. 128 games gives no more (5,701 / 5,552). At 64 the pool size barely matters (−5% from 10 to 40), so no cap is needed.
+    - For long runs on this machine: keep the total at about 8 workers (e.g. 4 runs × 2) with 64 games per worker. Note that changing `games_per_worker` changes the collected data, so an arm compared against an earlier run should keep that run's setting.
 
 ## Hypotheses, and what other work suggests
 

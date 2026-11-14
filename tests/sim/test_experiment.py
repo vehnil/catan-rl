@@ -5,6 +5,7 @@ import time
 
 import pytest
 import yaml
+from rich.console import Console
 
 from catan.config import ExperimentConfig, load_config
 from catan.sim import dashboard, experiment
@@ -137,6 +138,48 @@ def test_dashboard_snapshot_and_render(tmp_path):
     text = console.export_text()
     assert "vtest_s1" in text and "-6.50" in text and "0.05" in text
     assert "vtest_s1 192 " in dashboard.log_line(s1)
+
+
+def test_dashboard_shows_analysis_progress(tmp_path, monkeypatch):
+    plan = [
+        {"stage": "health", "key": "health", "games": 0},
+        {"stage": "curve", "key": "curve r1", "games": 400},
+        {"stage": "rate", "key": "rated r1 pre", "games": 100},
+        {"stage": "rate", "key": "rated r1 final", "games": 100},
+        {"stage": "compare", "key": "compare", "games": 400},
+    ]
+    monkeypatch.setattr(dashboard, "analysis_plan", lambda exp, state: plan)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 60))
+    (tmp_path / "driver.log").write_text(
+        f"{stamp} phase: analysis\n{stamp} analysis: health done\n"
+        f"{stamp} analysis: curve r1 done\n{stamp} analysis: rated r1 pre\n"
+    )
+    progress = {"task": "rated r1 final", "done": 50, "total": 100, "time": time.time()}
+    (tmp_path / experiment.PROGRESS).write_text(json.dumps(progress))
+    state = {"phase": "analysis", "runs": {"r1": {"run_id": "x", "status": "done"}}}
+    an = dashboard._analysis(None, state, tmp_path)  # type: ignore[arg-type]
+    by = {s["stage"]: s for s in an["stages"]}
+    assert an["games"] == 1000 and an["played"] == 550
+    assert by["ratings"]["done"] == 1 and by["ratings"]["current"] == "rated r1 final"
+    assert by["comparison"]["played"] == 0 and an["eta"] > time.time()
+    assert "curve r1 done (400 games)" in dashboard.analysis_line("curve r1", time.time(), an)
+    console = Console(record=True, width=120)
+    console.print(dashboard._render_analysis(an))
+    text = console.export_text()
+    assert "ratings" in text and "1/2" in text
+
+
+def test_dashboard_rate_uses_only_the_current_attempt():
+    def row(t, steps):
+        return {"time": t, "steps": steps}
+
+    before = [row(10 * i, 1000 * i) for i in range(100)]  # 100 steps/s, then stopped
+    t0 = before[-1]["time"] + 3600
+    burst = [row(t0 + 10 * i, 99_000 + 5000 * i) for i in range(6)]  # fast after resume
+    steady = [row(burst[-1]["time"] + 10 * i, burst[-1]["steps"] + 400 * i) for i in range(1, 90)]
+    assert dashboard._rate(before + burst) is None  # still warming up: no ETA yet
+    assert dashboard._rate(before + burst + steady) == pytest.approx(40)
+    assert dashboard._rate(before) == pytest.approx(100)
 
 
 @pytest.mark.slow

@@ -304,6 +304,63 @@ def pick_checkpoints(checkpoints: list[Any], every: int) -> list[Any]:
     return out
 
 
+PROGRESS = "analysis_progress.json"
+
+
+def analysis_plan(exp: Experiment, state: dict[str, Any]) -> list[dict[str, Any]]:
+    """The analysis tasks in the order ``analyse`` runs them, each with its game count.
+    A task's ``key`` is what the driver logs when it finishes ("analysis: <key> done", or
+    "analysis: rated <run> <label>" for ratings)."""
+    from catan.sim.curve import run_checkpoints
+    from catan.sim.store import Store
+
+    a = exp.cfg.analysis
+    runs = {n: e["run_id"] for n, e in state["runs"].items() if e["status"] == "done"}
+    with Store(exp.data_dir / "catan.db") as store:
+        checkpoints = {n: run_checkpoints(store, rid)[1] for n, rid in runs.items()}
+    plan: list[dict[str, Any]] = [{"stage": "health", "key": "health", "games": 0}]
+    if a.curve is not None:
+        for n in runs:
+            k = len(pick_checkpoints(checkpoints[n], a.curve.every))
+            games = k * len(a.curve.lineups) * a.curve.games
+            plan.append({"stage": "curve", "key": f"curve {n}", "games": games})
+    if a.rate is not None:
+        games = (
+            a.rate.games or load_config(exp.cwd / a.rate.reference, ReferenceConfig).gauntlet_games
+        )
+        for n in runs:
+            for c in pick_checkpoints(checkpoints[n], a.rate.every):
+                plan.append({"stage": "rate", "key": f"rated {n} {c.label}", "games": games})
+    if a.compare is not None:
+        ids = {x for v in a.compare.groups.values() if v != "self" for x in v}
+        if any(v == "self" for v in a.compare.groups.values()):
+            ids |= {f"final:{n}" for n in runs}
+        games = len(ids) * len(a.compare.lineups) * a.compare.games
+        plan.append({"stage": "compare", "key": "compare", "games": games})
+    return plan
+
+
+class _Progress:
+    """Game-level progress of the running analysis task, in ``analysis_progress.json``,
+    for the dashboard. Writes at most every couple of seconds."""
+
+    def __init__(self, exp_dir: Path) -> None:
+        self.path = exp_dir / PROGRESS
+        self.last = 0.0
+
+    def task(self, key: str) -> Any:
+        def update(done: int, total: int) -> None:
+            now = time.time()
+            if done == total or now - self.last >= 2:
+                self.last = now
+                tmp = self.path.with_suffix(".tmp")
+                tmp.write_text(json.dumps({"task": key, "done": done, "total": total, "time": now}))
+                tmp.replace(self.path)
+
+        update(0, 1)
+        return update
+
+
 def _pin(ref: str, data_dir: Path) -> str:
     from catan.sim.artifacts import read_manifest, resolve_policy_path
 
@@ -319,6 +376,7 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print) -> Path:
     from catan.sim.store import Store
 
     a, out, data = exp.cfg.analysis, exp.dir, exp.data_dir
+    progress = _Progress(out)
     runs = {n: e["run_id"] for n, e in state["runs"].items() if e["status"] == "done"}
     md = [f"# {exp.cfg.name}", "", exp.cfg.description, ""]
     if exp.cfg.comparison:
@@ -372,7 +430,14 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print) -> Path:
         for n in runs:
             ckpts = pick_checkpoints(checkpoints[n], a.curve.every)
             rows = evaluate_curve(
-                ckpts, a.curve.lineups, a.curve.games, a.curve.seed, None, a.workers, data
+                ckpts,
+                a.curve.lineups,
+                a.curve.games,
+                a.curve.seed,
+                None,
+                a.workers,
+                data,
+                progress=progress.task(f"curve {n}"),
             )
             (out / f"curve_{n}.json").write_text(json.dumps(rows, indent=1))
             table = []
@@ -394,7 +459,14 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print) -> Path:
         rated = []
         for n in runs:
             for c in pick_checkpoints(checkpoints[n], a.rate.every):
-                r = rate(f"policy:{c.policy_id}", ref_cfg, a.rate.games, a.workers, data)
+                r = rate(
+                    f"policy:{c.policy_id}",
+                    ref_cfg,
+                    a.rate.games,
+                    a.workers,
+                    data,
+                    progress=progress.task(f"rated {n} {c.label}"),
+                )
                 rated.append({"run": n, "policy": c.label, "id": c.policy_id, **r})
                 log(f"analysis: rated {n} {c.label}")
         (out / "ratings.json").write_text(json.dumps(rated, indent=1))
@@ -419,6 +491,7 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print) -> Path:
             None,
             a.workers,
             data,
+            progress=progress.task("compare"),
         )
         summary = group_summary(rows, groups)
         (out / "compare.json").write_text(json.dumps({"groups": groups, "rows": rows}, indent=1))

@@ -103,7 +103,10 @@ def launch(
     if state and alive(state.get("driver_pid")):
         raise RuntimeError(f"{exp.cfg.name} is already running (driver pid {state['driver_pid']})")
     if state.get("phase") == "done":
-        raise RuntimeError(f"{exp.cfg.name} already finished: {exp.dir / 'report.md'}")
+        raise RuntimeError(
+            f"{exp.cfg.name} already finished: {exp.dir / 'report.md'}"
+            " (`catan experiment analyse` reruns the analysis)"
+        )
     code = exp.dir / "code"
     if not state:  # first launch: check the tree, freeze the code
         git = git_state(exp.cwd)
@@ -342,13 +345,17 @@ def analysis_plan(exp: Experiment, state: dict[str, Any]) -> list[dict[str, Any]
 
 class _Progress:
     """Game-level progress of the running analysis task, in ``analysis_progress.json``,
-    for the dashboard. Writes at most every couple of seconds."""
+    for the dashboard. Writes at most every couple of seconds. With ``echo``, long tasks
+    (1,000+ games) also report each quarter."""
 
-    def __init__(self, exp_dir: Path) -> None:
+    def __init__(self, exp_dir: Path, echo: Any = None) -> None:
         self.path = exp_dir / PROGRESS
+        self.echo = echo
         self.last = 0.0
 
     def task(self, key: str) -> Any:
+        quarter = [0]
+
         def update(done: int, total: int) -> None:
             now = time.time()
             if done == total or now - self.last >= 2:
@@ -356,6 +363,10 @@ class _Progress:
                 tmp = self.path.with_suffix(".tmp")
                 tmp.write_text(json.dumps({"task": key, "done": done, "total": total, "time": now}))
                 tmp.replace(self.path)
+            q = 4 * done // max(total, 1)
+            if self.echo is not None and total >= 1000 and 0 < q < 4 and q > quarter[0]:
+                quarter[0] = q
+                self.echo(f"  {key}: {done:,}/{total:,} games")
 
         update(0, 1)
         return update
@@ -367,7 +378,48 @@ def _pin(ref: str, data_dir: Path) -> str:
     return str(read_manifest(resolve_policy_path(ref.removeprefix("policy:"), data_dir))["id"])
 
 
-def analyse(exp: Experiment, state: dict[str, Any], log: Any = print) -> Path:
+def reanalyse(manifest: str | Path, cwd: str | Path | None = None, echo: Any = print) -> Path:
+    """Run (or rerun) the analysis of a stopped or finished experiment in this process,
+    with the current code: ``catan experiment analyse``. Logs to ``driver.log`` too, so
+    ``watch`` follows it."""
+    exp = Experiment(manifest, cwd)
+    state = exp.state()
+    if not state:
+        raise RuntimeError(f"{exp.cfg.name} has never been launched")
+    if alive(state.get("driver_pid")):
+        raise RuntimeError(f"{exp.cfg.name} is running (driver pid {state['driver_pid']})")
+    if not any(e["status"] == "done" for e in state["runs"].values()):
+        raise RuntimeError(f"{exp.cfg.name} has no finished runs to analyse")
+
+    def log(msg: str) -> None:
+        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+        with open(exp.dir / "driver.log", "a") as f:
+            f.write(line + "\n")
+        echo(line)
+
+    git = git_state(exp.cwd)
+    state.setdefault("analyses", []).append(
+        {"time": time.time(), "commit": git.get("commit"), "dirty": git.get("dirty")}
+    )
+    state["phase"] = "analysis"
+    state["driver_pid"] = None
+    _write_state(exp.dir, state)
+    log("phase: analysis")
+    try:
+        with contextlib.chdir(exp.cwd):  # stored policy paths are relative to it
+            report = analyse(exp, state, log, echo=echo)
+    except Exception as e:
+        log(f"analysis failed: {e!r}")
+        state["phase"] = "analysis failed"
+        _write_state(exp.dir, state)
+        raise
+    state["phase"] = "done"
+    _write_state(exp.dir, state)
+    log("phase: done")
+    return report
+
+
+def analyse(exp: Experiment, state: dict[str, Any], log: Any = print, echo: Any = None) -> Path:
     """Health, curve, reference rating and comparison for the finished runs -> report.md."""
     from catan.sim.compare import METRICS, group_summary
     from catan.sim.curve import Checkpoint, evaluate_curve, run_checkpoints
@@ -376,7 +428,7 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print) -> Path:
     from catan.sim.store import Store
 
     a, out, data = exp.cfg.analysis, exp.dir, exp.data_dir
-    progress = _Progress(out)
+    progress = _Progress(out, echo)
     runs = {n: e["run_id"] for n, e in state["runs"].items() if e["status"] == "done"}
     md = [f"# {exp.cfg.name}", "", exp.cfg.description, ""]
     if exp.cfg.comparison:

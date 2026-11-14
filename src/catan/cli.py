@@ -194,7 +194,9 @@ def export(
 @app.command()
 def timeline(
     path: Path,
-    out: Annotated[Path | None, typer.Option("--out", "-o", help="Write here instead of stdout.")] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Write here instead of stdout.")
+    ] = None,
 ) -> None:
     """Export a replay as per-step JSON (board, actions, events, state, beliefs)."""
     from catan.sim.replay import load_replay
@@ -210,9 +212,13 @@ def timeline(
 
 @app.command()
 def view(
-    path: Annotated[Path | None, typer.Argument(help="Replay to open (default: the picker).")] = None,
+    path: Annotated[
+        Path | None, typer.Argument(help="Replay to open (default: the picker).")
+    ] = None,
     port: int = 8765,
-    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open a browser tab.")] = True,
+    open_browser: Annotated[
+        bool, typer.Option("--open/--no-open", help="Open a browser tab.")
+    ] = True,
     data_dir: DataOpt = "data",
 ) -> None:
     """Open the game viewer in a browser."""
@@ -351,7 +357,11 @@ def rate(
     for spec in candidates or []:
         rows.append(
             ref.rate(
-                _pin(spec, data_dir), cfg, games, workers, data_dir,
+                _pin(spec, data_dir),
+                cfg,
+                games,
+                workers,
+                data_dir,
                 progress=lambda d, t: _progress(d, t, None),
             )
         )
@@ -490,6 +500,23 @@ def experiment_status(target: ExpTarget, data_dir: DataOpt = "data") -> None:
     from catan.sim import dashboard
 
     Console().print(dashboard.render(dashboard.snapshot(_exp_dir(target, data_dir))))
+
+
+@experiment_app.command("analyse")
+@experiment_app.command("analyze", hidden=True)
+def experiment_analyse(target: ExpTarget, data_dir: DataOpt = "data") -> None:
+    """Run (or rerun) the analysis of a stopped or finished experiment, here and now, with
+    the current code. Prints progress; `watch` in another terminal follows it too."""
+    from catan.sim.experiment import read_state, reanalyse
+
+    manifest = target
+    if not target.endswith((".yaml", ".yml")):
+        manifest = read_state(_exp_dir(target, data_dir)).get("manifest", target)
+    try:
+        report = reanalyse(manifest)
+    except RuntimeError as e:
+        raise typer.BadParameter(str(e)) from e
+    typer.echo(f"report: {report}")
 
 
 @experiment_app.command("stop")

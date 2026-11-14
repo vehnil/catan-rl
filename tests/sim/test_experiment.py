@@ -229,3 +229,21 @@ def test_stopped_experiment_resumes_from_checkpoint(tmp_path):
         assert entry["status"] == "done" and entry["attempts"] == 2
         assert entry["run_id"] == first_ids[name]  # resumed the same run, not a new one
         assert "resume" in (exp.dir / f"{name}.log").read_text()
+
+
+@pytest.mark.slow
+def test_analysis_can_be_rerun(tmp_path):
+    path = _setup(tmp_path, analysis={"curve": None, "rate": None, "workers": 1})
+    exp = experiment.Experiment(path, tmp_path)
+    with pytest.raises(RuntimeError):  # never launched
+        experiment.reanalyse(path, tmp_path, echo=lambda _: None)
+    experiment.launch(path, allow_dirty=True, cwd=tmp_path)
+    _wait(exp.dir, lambda s: s.get("phase") in ("done", "failed", "analysis failed"))
+    (exp.dir / "report.md").unlink()
+    lines: list[str] = []
+    report = experiment.reanalyse(path, tmp_path, echo=lines.append)
+    assert report.exists() and "## Health" in report.read_text()
+    state = experiment.read_state(exp.dir)
+    assert state["phase"] == "done" and len(state["analyses"]) == 1
+    assert any("phase: analysis" in line for line in lines)
+    assert (exp.dir / "driver.log").read_text().count("phase: analysis") == 2

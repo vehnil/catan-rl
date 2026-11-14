@@ -52,6 +52,7 @@ def _setup(tmp_path, analysis=None, **run_kw):
                 "groups": {"self": "self", "first": ["vtest_s1"]},
                 "lineups": {"rand": ["random"] * 3},
                 "games": 2,
+                "steps": [128],
             },
             "workers": 1,
         },
@@ -83,6 +84,10 @@ def test_manifest_validation(tmp_path):
         ExperimentConfig(name="x", runs=[])
     with pytest.raises(ValueError):  # unknown key
         ExperimentConfig.model_validate({"name": "x", "runs": ["a"], "typo": 1})
+    with pytest.raises(ValueError):  # a group string must be self or experiment:<name>
+        ExperimentConfig.model_validate(
+            {"name": "x", "runs": ["a"], "analysis": {"compare": {"groups": {"g": "v7"}}}}
+        )
 
 
 def test_pick_checkpoints():
@@ -196,6 +201,10 @@ def test_experiment_runs_to_report(tmp_path):
     report = (exp.dir / "report.md").read_text()
     for section in ("## Speed", "## Health", "### vtest_s1", "## Curve", "## Comparison"):
         assert section in report
+    assert "### Final policies" in report and "### At 128 steps" in report
+    points = json.loads((exp.dir / "compare.json").read_text())["points"]
+    assert points["final"]["first"] == points["final"]["self"][:1]
+    assert points["128"]["self"] != points["final"]["self"]
     assert "nothing; a test" in report
     with pytest.raises(RuntimeError):  # finished: not relaunched
         experiment.launch(path, allow_dirty=True, cwd=tmp_path)

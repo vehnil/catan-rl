@@ -335,9 +335,7 @@ def analysis_plan(exp: Experiment, state: dict[str, Any]) -> list[dict[str, Any]
             for c in pick_checkpoints(checkpoints[n], a.rate.every):
                 plan.append({"stage": "rate", "key": f"rated {n} {c.label}", "games": games})
     if a.compare is not None:
-        ids = {x for v in a.compare.groups.values() if v != "self" for x in v}
-        if any(v == "self" for v in a.compare.groups.values()):
-            ids |= {f"final:{n}" for n in runs}
+        ids = {i for p in compare_points(exp, state).values() for m in p.values() for i in m}
         games = len(ids) * len(a.compare.lineups) * a.compare.games
         plan.append({"stage": "compare", "key": "compare", "games": games})
     return plan
@@ -370,6 +368,66 @@ class _Progress:
 
         update(0, 1)
         return update
+
+
+def _member_runs(
+    exp: Experiment, state: dict[str, Any], group: str | list[str], store: Any
+) -> list[tuple[str, str | None]]:
+    """(ref, run id or None) for each member of a compare group."""
+    if group == "self":
+        return [(n, e["run_id"]) for n, e in state["runs"].items() if e["status"] == "done"]
+    if isinstance(group, str):  # experiment:<name>
+        other = read_state(exp.data_dir / "experiments" / group.removeprefix("experiment:"))
+        if not other:
+            raise KeyError(f"no experiment {group.removeprefix('experiment:')!r}")
+        return [(n, e["run_id"]) for n, e in other["runs"].items() if e["status"] == "done"]
+    out: list[tuple[str, str | None]] = []
+    for ref in group:
+        row = store.conn.execute(  # a training run: newest finished one with that name
+            "SELECT id FROM runs WHERE kind = 'train' AND (id = ? OR name = ?)"
+            " ORDER BY id = ? DESC, status = 'done' DESC, created_at DESC LIMIT 1",
+            (ref, ref, ref),
+        ).fetchone()
+        out.append((ref, row["id"] if row else None))
+    return out
+
+
+def compare_points(exp: Experiment, state: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
+    """Policy ids for each comparison point ("final", then each of ``compare.steps``) and
+    group. A run's point is its final policy, or its checkpoint nearest the step count."""
+    from catan.sim.curve import run_checkpoints
+    from catan.sim.store import Store
+
+    c = exp.cfg.analysis.compare
+    assert c is not None
+    points: dict[str, dict[str, list[str]]] = {"final": {}, **{str(s): {} for s in c.steps}}
+    with Store(exp.data_dir / "catan.db") as store:
+        for g, v in c.groups.items():
+            for p in points.values():
+                p[g] = []
+            for ref, run_id in _member_runs(exp, state, v, store):
+                if run_id is None:  # a plain policy; for `steps`, use the run it came from
+                    pid = _pin(ref, exp.data_dir)
+                    points["final"][g].append(pid)
+                    if not c.steps:
+                        continue
+                    run_id = (store.policy(pid) or {}).get("run_id")
+                    if run_id is None:
+                        raise ValueError(f"group {g!r}: {ref} has no training run for `steps`")
+                    ckpts = run_checkpoints(store, run_id)[1]
+                else:
+                    ckpts = run_checkpoints(store, run_id)[1]
+                    points["final"][g].append(
+                        next(k.policy_id for k in ckpts if k.label == "final")
+                    )
+                for s in c.steps:
+                    near = min(
+                        (k for k in ckpts if k.label != "pre"), key=lambda k: abs(k.steps - s)
+                    )
+                    if abs(near.steps - s) > 0.1 * s:
+                        raise ValueError(f"group {g!r}: {ref} has no checkpoint near {s} steps")
+                    points[str(s)][g].append(near.policy_id)
+    return points
 
 
 def _pin(ref: str, data_dir: Path) -> str:
@@ -446,11 +504,9 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print, echo: Any 
 
     flush()
     checkpoints: dict[str, list[Any]] = {}
-    finals: dict[str, str] = {}
     with Store(data / "catan.db") as store:
         for n, rid in runs.items():
             _, checkpoints[n] = run_checkpoints(store, rid)
-            finals[n] = next(c.policy_id for c in checkpoints[n] if c.label == "final")
         md += [
             "",
             "## Speed",
@@ -530,11 +586,10 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print, echo: Any 
         flush()
 
     if a.compare is not None:
-        groups = {
-            g: list(finals.values()) if v == "self" else [_pin(x, data) for x in v]
-            for g, v in a.compare.groups.items()
-        }
-        ids = list(dict.fromkeys(i for members in groups.values() for i in members))
+        points = compare_points(exp, state)
+        ids = list(
+            dict.fromkeys(i for p in points.values() for members in p.values() for i in members)
+        )
         rows = evaluate_curve(
             [Checkpoint(i, i, 0) for i in ids],
             a.compare.lineups,
@@ -545,24 +600,31 @@ def analyse(exp: Experiment, state: dict[str, Any], log: Any = print, echo: Any 
             data,
             progress=progress.task("compare"),
         )
-        summary = group_summary(rows, groups)
-        (out / "compare.json").write_text(json.dumps({"groups": groups, "rows": rows}, indent=1))
+        (out / "compare.json").write_text(
+            json.dumps({"groups": points["final"], "points": points, "rows": rows}, indent=1)
+        )
 
         def ci(t: tuple[float, float, float]) -> str:
             m, lo, hi = t
             return f"{m:.3f}" if lo != lo else f"{m:.3f} [{lo:.3f}, {hi:.3f}]"
 
-        table = [
-            {
-                "group": r["group"],
-                "lineup": r["lineup"],
-                "n": r["n"],
-                **{m: ci(r[m]) for m in METRICS},
-            }
-            for r in summary
-        ]
-        md += ["", "## Comparison (mean and 95% t-interval over each group)", ""]
-        md.append(_fmt_table(table, ["group", "lineup", "n", *METRICS]))
+        md += ["", "## Comparison (mean and 95% t-interval over each group)"]
+        for label, groups in points.items():
+            table = [
+                {
+                    "group": r["group"],
+                    "lineup": r["lineup"],
+                    "n": r["n"],
+                    **{m: ci(r[m]) for m in METRICS},
+                }
+                for r in group_summary(rows, groups)
+            ]
+            if len(points) > 1:
+                md += [
+                    "",
+                    "### Final policies" if label == "final" else f"### At {int(label):,} steps",
+                ]
+            md += ["", _fmt_table(table, ["group", "lineup", "n", *METRICS])]
         flush()
         log("analysis: compare done")
     return out / "report.md"

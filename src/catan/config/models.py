@@ -169,16 +169,26 @@ class RateSpec(_Strict):
 
 
 class CompareSpec(_Strict):
-    """Groups of policies on the same games. ``self`` is this experiment's final policies;
-    other groups list policy refs (ids, names, or training config names)."""
+    """Groups of policies on the same games. A group is ``self`` (this experiment's runs),
+    ``experiment:<name>`` (another experiment's runs), or a list of training runs (config
+    names or run ids) and policy refs. Runs contribute their final policy, and with
+    ``steps`` also their checkpoint nearest each step count, compared separately."""
 
-    groups: dict[str, Literal["self"] | list[str]]
+    groups: dict[str, str | list[str]]
     lineups: dict[str, list[str]] = {
         "greedy3": ["greedy", "greedy", "greedy"],
         "mix": ["random", "random", "greedy"],
     }
     games: int = Field(400, ge=1)
     seed: int = 6000
+    steps: list[int] = []  # e.g. [5000000]: also compare every run at matched steps
+
+    @model_validator(mode="after")
+    def _check_groups(self) -> CompareSpec:
+        for g, v in self.groups.items():
+            if isinstance(v, str) and v != "self" and not v.startswith("experiment:"):
+                raise ValueError(f"group {g!r}: {v!r} is not 'self', 'experiment:<name>' or a list")
+        return self
 
 
 class AnalysisSpec(_Strict):

@@ -199,13 +199,21 @@ class AnalysisSpec(_Strict):
     workers: int = Field(8, ge=1)
 
 
+class RunSweep(_Strict):
+    """One training config run once per seed, as ``<name>_s1``, ``<name>_s2``, ..."""
+
+    config: str  # path, relative to the experiment file
+    seeds: list[int] = Field(min_length=1)
+
+
 class ExperimentConfig(_Strict):
     """``catan experiment run``: train several configs at once, then analyse them."""
 
     name: str
     description: str = ""
     comparison: str = ""  # what counts as better, written down before the run
-    runs: list[str]  # training config paths, relative to the experiment file
+    # Training config paths, relative to the experiment file, or seed sweeps of one config.
+    runs: list[str | RunSweep]
     max_resumes: int = Field(3, ge=0)  # per run, after crashes (stops don't count)
     # Total rollout workers (ppo.num_envs) training at once; runs beyond it wait their turn
     # in file order. None: start every run at once.

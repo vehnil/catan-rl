@@ -294,3 +294,30 @@ def test_worker_budget_starts_runs_in_order():
     for th in threads:
         th.join(5)
     assert started == names and peak[0] <= 4 and driver.used == 0
+
+
+def test_seed_sweep_expands_into_runs(tmp_path):
+    exp_dir = tmp_path / "experiments" / "vsweep"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "arm.yaml").write_text(yaml.safe_dump(_train_cfg("vsweep_arm", 1)))
+    (exp_dir / "other.yaml").write_text(yaml.safe_dump(_train_cfg("vsweep_other", 9)))
+    manifest = {
+        "name": "vsweep",
+        "runs": [{"config": "arm.yaml", "seeds": [50, 51, 52]}, "other.yaml"],
+        "analysis": {"curve": None, "rate": None},
+    }
+    path = exp_dir / "experiment.yaml"
+    path.write_text(yaml.safe_dump(manifest))
+    exp = experiment.Experiment(path, tmp_path)
+    assert exp.names == ["vsweep_arm_s1", "vsweep_arm_s2", "vsweep_arm_s3", "vsweep_other"]
+    assert [c.seed for c in exp.train_cfgs] == [50, 51, 52, 9]
+    exp.write_generated()
+    written = load_config(exp.run_paths[1], experiment.TrainConfig)
+    assert written.name == "vsweep_arm_s2" and written.seed == 51
+    assert written.ppo == exp.train_cfgs[1].ppo
+    # Once written, the files are what trains: editing the base config doesn't change them.
+    (exp_dir / "arm.yaml").write_text(yaml.safe_dump(_train_cfg("vsweep_arm", 1, total_steps=999)))
+    again = experiment.Experiment(path, tmp_path)
+    assert again.train_cfgs[0].ppo.total_steps == 256 and again.run_paths == exp.run_paths
+    with pytest.raises(ValueError):  # a sweep needs seeds
+        ExperimentConfig.model_validate({"name": "x", "runs": [{"config": "a", "seeds": []}]})

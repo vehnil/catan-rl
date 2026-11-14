@@ -97,36 +97,48 @@ Any stored policy can play in a tournament as `policy:<id>`. Add `#argmax` (`pol
 ## Experiments (`experiment.py`, `dashboard.py`)
 
 An experiment file (`ExperimentConfig`, e.g. [`experiments/v7_baseline/experiment.yaml`](../experiments/v7_baseline/experiment.yaml)) lists:
-- the training configs to run at once (usually one per seed);
+- the training runs, as config paths or seed sweeps of one config:
+  ```yaml
+  runs:
+    - {config: rank.yaml, seeds: [50, 51, 52]}   # rank_s1, rank_s2, rank_s3
+    - control.yaml
+  ```
+  A sweep's per-seed configs are written to `data/experiments/<name>/configs/` on first launch and trained from there.
+- `max_workers` (optional): the most rollout workers (`ppo.num_envs`, summed over runs) to train at once. Runs beyond it are queued and start in file order as workers free up. Without it, every run starts at once.
+- `max_resumes`: restarts per run after crashes. Stops don't count.
 - the comparison written down before the run;
 - the analysis to run when they finish:
   - `health`;
   - a `curve` over every `every` steps of checkpoints, against named lineups;
   - reference ratings (`rate`);
-  - a `compare` of groups, where `self` means this experiment's final policies.
+  - a `compare` of groups on the same games. A group is `self` (this experiment's runs), `experiment:<name>` (another experiment's runs), or a list of training runs (config names or run ids) and policy refs. Runs contribute their final policy. With `steps: [5000000, ...]`, each run is also compared at its checkpoint nearest each step count, one table per point; this is how an arm is screened against a baseline at matched steps.
 
 `catan experiment run <file>`:
 1. **Checks the working tree.** It refuses uncommitted changes unless you pass `--allow-dirty`.
 2. **Freezes the code:** it copies the installed `catan` package to `data/experiments/<name>/code/`. Every training process, resume and the analysis runs from that copy, so editing code or running `uv run` in the same checkout can't change a running experiment.
 3. **Starts a detached driver** in its own process session, under `caffeinate` on macOS, so closing the terminal or Claude Code doesn't stop it. The driver:
-   - trains all runs at once, each under a supervisor that resumes from the last checkpoint after a crash (`max_resumes`);
+   - trains the runs (all at once, or queued under `max_workers`), each under a supervisor that resumes from the last checkpoint after a crash (`max_resumes`);
    - then runs the analysis, writing `report.md` and JSON results.
 
 **Running the same command again continues the experiment.** Finished runs are skipped, runs still alive from an earlier driver are waited on, and stopped ones resume. A finished experiment isn't relaunched.
 
+**`catan experiment analyse <file or name>`** runs the analysis again, in the foreground and with the current code (not the frozen copy), for a stopped or finished experiment. Use it after changing the analysis section or fixing analysis code. It prints each step, logs to `driver.log` so `watch` follows it too, and records each rerun in `state.json`.
+
 Everything is in `data/experiments/<name>/`:
-- `state.json`: the phase and each run's status, attempts, run id and pid;
+- `state.json`: the phase and each run's status, attempts, crashes, run id and pid;
 - `driver.log`, plus one `<run>.log` per run;
-- `code/`;
-- `report.md`, `health_*.md`, `curve_*.json`, `ratings.json` and `compare.json`.
+- `code/`, and `configs/` for seed sweeps;
+- `report.md`, `health_*.md`, `curve_*.json`, `ratings.json` and `compare.json`;
+- `analysis_progress.json`: the running analysis task's game count, for the live view.
 
 **`catan experiment watch <file or name>`** is a live view, refreshed every 10 seconds. It shows:
-- a progress bar per run, with steps, current steps/s, ETA and resumes;
+- a progress bar per run, with steps, steps/s, ETA, and resumes and crashes. Steps/s is wall-clock speed over the last 15 minutes of the current attempt, so the ETA ignores time before a resume and the burst right after one;
 - the latest evaluation (VP margin, rank, win rate);
 - health (explained variance, KL, clip fraction), in red when out of range;
-- the load average, and the busiest processes when the machine is overloaded.
+- the load average, and the busiest processes when the machine is overloaded;
+- during the analysis: each stage (health, curves, ratings, comparison) with tasks and games done, the current task, and an ETA.
 
-It also prints a log line per run every 100k steps. Ctrl-C closes the view; the experiment keeps running. `catan experiment status` prints the view once, and `catan experiment stop` stops the driver and its runs.
+It also prints a log line per run every 100k steps, and one per finished analysis task. Ctrl-C closes the view; the experiment keeps running. `catan experiment status` prints the view once. `catan experiment stop` stops the driver and its runs and marks them stopped; running the experiment again resumes them without using up `max_resumes`.
 
 ## CLI (`cli.py`)
 
@@ -143,7 +155,7 @@ Run with `uv run --no-editable catan …`.
 | `catan rate [policy:<id> …] [--calibrate] [--reference experiments/reference.yaml]` | Rate agents against a fixed reference set. `--calibrate` runs the references' round-robin once to fix their ratings; after that each candidate plays a gauntlet and only its own rating moves, so all candidates share one scale |
 | `catan compare --group name=id,id,id [--group …] --vs name=a,b,c [--vs …]` | Compare groups of policies (e.g. one per seed) on the same games: each group's mean VP margin, rank, win rate and VP with a 95% t-interval over its members |
 | `catan health <run> [--windows N]` | Summarize a training run's PPO health metrics (entropy, explained variance, KL, clip fraction, value loss, grad norm) over windows, flagging warning signs |
-| `catan experiment run <file> [--allow-dirty] [--no-watch]` · `watch` · `status` · `stop` | Run an experiment unattended (detached, frozen code, auto-resume, analysis at the end) and watch it; see above |
+| `catan experiment run <file> [--allow-dirty] [--no-watch]` · `watch` · `status` · `stop` · `analyse` | Run an experiment unattended (detached, frozen code, auto-resume, queued under `max_workers`, analysis at the end), watch it, or rerun its analysis; see above |
 | `catan replay <file> [--step] [--seat N]` | Re-simulate, render, verify |
 | `catan view [file] [--port] [--no-open]` | Browser viewer for stored games |
 | `catan timeline <file> [-o out.json]` | Export a replay as per-step JSON |

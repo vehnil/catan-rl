@@ -25,9 +25,13 @@ catan experiment run experiments/vN/experiment.yaml   # launches in the backgrou
 catan experiment watch vN                        # reattach later (Ctrl-C closes the view only)
 catan experiment status vN                       # one-shot view
 catan experiment stop vN                         # stop; `run` again continues from checkpoints
+catan experiment analyse vN                      # rerun the analysis with the current code
 ```
 
-- **An experiment file** lists the training configs (one per seed), the comparison written down before the run, and the analysis to run at the end. Copy [v7_baseline/experiment.yaml](v7_baseline/experiment.yaml) to start one.
+- **An experiment file** lists the training runs, the comparison written down before the run, and the analysis to run at the end. Copy [v9_rank_reward/experiment.yaml](v9_rank_reward/experiment.yaml) to start one. Details in [docs/40-simulation.md](../docs/40-simulation.md#experiments-experimentpy-dashboardpy).
+  - **Seeds:** `runs: [{config: arm.yaml, seeds: [50, 51, 52]}]` runs one config per seed (`<name>_s1`…), so arms don't need a file per seed.
+  - **Machine budget:** `max_workers: 8` queues runs so at most 8 rollout workers train at once. On this M1, more than about 8 adds nothing ([findings](../notes/findings.md) 24).
+  - **Matched-step screens:** `compare.steps: [5000000]` compares every group at its 5M checkpoint as well as at the end. Groups can name other experiments (`experiment:v8_continuation`) or runs (`[v7_baseline_s1, ...]`).
 - **It keeps running** if the terminal or Claude Code closes, and resumes runs after crashes.
 - **Results:** `data/experiments/<name>/report.md`.
 - **Exact reproducibility:** set `ppo.deterministic_collection: true` in the training configs.

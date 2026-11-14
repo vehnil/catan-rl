@@ -206,7 +206,10 @@ class ExperimentConfig(_Strict):
     description: str = ""
     comparison: str = ""  # what counts as better, written down before the run
     runs: list[str]  # training config paths, relative to the experiment file
-    max_resumes: int = Field(3, ge=0)  # per run, after crashes
+    max_resumes: int = Field(3, ge=0)  # per run, after crashes (stops don't count)
+    # Total rollout workers (ppo.num_envs) training at once; runs beyond it wait their turn
+    # in file order. None: start every run at once.
+    max_workers: int | None = Field(None, ge=1)
     analysis: AnalysisSpec = AnalysisSpec()
 
     @model_validator(mode="after")

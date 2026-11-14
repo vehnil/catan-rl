@@ -190,6 +190,8 @@ def test_dashboard_rate_uses_only_the_current_attempt():
 @pytest.mark.slow
 def test_experiment_runs_to_report(tmp_path):
     path = _setup(tmp_path)
+    manifest = yaml.safe_load(path.read_text())
+    path.write_text(yaml.safe_dump({**manifest, "max_workers": 1}))  # one run at a time
     exp = experiment.Experiment(path, tmp_path)
     state = experiment.launch(path, allow_dirty=True, cwd=tmp_path)
     assert (exp.dir / "code" / "catan" / "cli.py").exists()  # frozen code snapshot
@@ -202,6 +204,8 @@ def test_experiment_runs_to_report(tmp_path):
     for section in ("## Speed", "## Health", "### vtest_s1", "## Curve", "## Comparison"):
         assert section in report
     assert "### Final policies" in report and "### At 128 steps" in report
+    log = (exp.dir / "driver.log").read_text()
+    assert log.index("vtest_s1: done") < log.index("vtest_s2: start")
     points = json.loads((exp.dir / "compare.json").read_text())["points"]
     assert points["final"]["first"] == points["final"]["self"][:1]
     assert points["128"]["self"] != points["final"]["self"]
@@ -230,12 +234,15 @@ def test_stopped_experiment_resumes_from_checkpoint(tmp_path):
     state = _wait(exp.dir, has_checkpoint)
     first_ids = {n: e["run_id"] for n, e in state["runs"].items()}
     assert experiment.stop(exp.dir)
-    _wait(exp.dir, lambda s: not experiment.alive(s.get("driver_pid")), timeout=30)
+    stopped = experiment.read_state(exp.dir)
+    assert stopped["phase"] == "stopped"
+    assert all(e["status"] in ("stopped", "done") for e in stopped["runs"].values())
     experiment.launch(path, allow_dirty=True, cwd=tmp_path)
     state = _wait(exp.dir, lambda s: s.get("phase") in ("done", "failed", "analysis failed"))
     assert state["phase"] == "done", (exp.dir / "driver.log").read_text()
     for name, entry in state["runs"].items():
         assert entry["status"] == "done" and entry["attempts"] == 2
+        assert entry.get("crashes", 0) == 0  # a stop isn't a crash
         assert entry["run_id"] == first_ids[name]  # resumed the same run, not a new one
         assert "resume" in (exp.dir / f"{name}.log").read_text()
 
@@ -247,7 +254,7 @@ def test_analysis_can_be_rerun(tmp_path):
     with pytest.raises(RuntimeError):  # never launched
         experiment.reanalyse(path, tmp_path, echo=lambda _: None)
     experiment.launch(path, allow_dirty=True, cwd=tmp_path)
-    _wait(exp.dir, lambda s: s.get("phase") in ("done", "failed", "analysis failed"))
+    _wait(exp.dir, lambda s: s.get("phase") == "done" and not experiment.alive(s["driver_pid"]))
     (exp.dir / "report.md").unlink()
     lines: list[str] = []
     report = experiment.reanalyse(path, tmp_path, echo=lines.append)
@@ -256,3 +263,34 @@ def test_analysis_can_be_rerun(tmp_path):
     assert state["phase"] == "done" and len(state["analyses"]) == 1
     assert any("phase: analysis" in line for line in lines)
     assert (exp.dir / "driver.log").read_text().count("phase: analysis") == 2
+
+
+def test_worker_budget_starts_runs_in_order():
+    import threading
+    from types import SimpleNamespace
+
+    names = ["a", "b", "c", "d"]
+    exp = SimpleNamespace(
+        names=names,
+        cfg=SimpleNamespace(max_workers=4),
+        state=lambda: {"runs": {n: {"status": "pending"} for n in names}},
+    )
+    driver = experiment._Driver(exp)  # type: ignore[arg-type]
+    driver.waiting = set(names)
+    started, lock, peak = [], threading.Lock(), [0]
+
+    def job(name, n):
+        driver._acquire(name, n)
+        with lock:
+            started.append(name)
+            peak[0] = max(peak[0], driver.used)
+        time.sleep(0.05)
+        driver._release(name, n)
+
+    sizes = {"a": 2, "b": 2, "c": 3, "d": 1}
+    threads = [threading.Thread(target=job, args=(n, sizes[n])) for n in reversed(names)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(5)
+    assert started == names and peak[0] <= 4 and driver.used == 0

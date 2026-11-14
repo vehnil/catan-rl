@@ -160,6 +160,7 @@ def snapshot(exp_dir: str | Path) -> dict[str, Any]:
                 "name": name,
                 "status": entry["status"],
                 "resumes": max(0, entry["attempts"] - 1),
+                "crashes": entry.get("crashes", 0),
                 "steps": steps,
                 "total": total,
                 "sps": sps,
@@ -229,9 +230,13 @@ def render(snap: dict[str, Any]) -> Group:
             r["name"],
             Text(
                 r["status"],
-                style={"done": "green", "failed": "bold red", "crashed": "yellow"}.get(
-                    r["status"], ""
-                ),
+                style={
+                    "done": "green",
+                    "failed": "bold red",
+                    "crashed": "yellow",
+                    "stopped": "yellow",
+                    "queued": "dim",
+                }.get(r["status"], ""),
             ),
             ProgressBar(total=r["total"], completed=min(r["steps"], r["total"]), width=24),
             f"{_steps(r['steps'])} / {_steps(r['total'])}",
@@ -243,7 +248,10 @@ def render(snap: dict[str, Any]) -> Group:
             _health(r["ev"], ".2f", r["ev"] is not None and r["ev"] < 0.1),
             _health(r["kl"], ".4f", r["kl"] is not None and r["kl"] > 0.05),
             _health(r["clip"], ".2f", r["clip"] is not None and r["clip"] > 0.3),
-            str(r["resumes"]),
+            Text(
+                f"{r['resumes']} ({r['crashes']} crashed)" if r["crashes"] else str(r["resumes"]),
+                style="yellow" if r["crashes"] else "",
+            ),
         )
     parts: list[Any] = [head, table]
     if snap.get("analysis"):

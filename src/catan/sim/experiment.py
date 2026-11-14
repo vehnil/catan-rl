@@ -157,6 +157,15 @@ def stop(exp_dir: str | Path) -> bool:
         return False
     with contextlib.suppress(ProcessLookupError):
         os.killpg(int(pid), signal.SIGTERM)
+    deadline = time.time() + 15
+    while alive(pid) and time.time() < deadline:
+        time.sleep(0.2)
+    state = read_state(exp_dir)  # the driver may have written since
+    state["phase"] = "stopped"
+    for entry in state["runs"].values():
+        if entry["status"] in ("running", "queued"):
+            entry["status"], entry["pid"] = "stopped", None
+    _write_state(Path(exp_dir), state)
     return True
 
 
@@ -181,6 +190,34 @@ class _Driver:
         self.exp = exp
         self.lock = threading.Lock()
         self.state = exp.state()
+        # Worker budget (``max_workers``): runs start in file order while their workers fit.
+        self.slots = threading.Condition()
+        self.used = 0
+        self.order = {n: i for i, n in enumerate(exp.names)}
+        self.waiting: set[str] = set()
+
+    def _acquire(self, name: str, n: int) -> None:
+        cap = self.exp.cfg.max_workers
+        if cap is None:
+            return
+        with self.slots:
+            self.waiting.add(name)
+            while not (
+                min(self.waiting, key=self.order.__getitem__) == name
+                and (self.used == 0 or self.used + n <= cap)
+            ):
+                self.slots.wait()
+            self.waiting.discard(name)
+            self.used += n
+            self.slots.notify_all()
+
+    def _release(self, name: str, n: int | None) -> None:
+        if self.exp.cfg.max_workers is None:
+            return
+        with self.slots:
+            self.waiting.discard(name)
+            self.used -= n or 0
+            self.slots.notify_all()
 
     def save(self) -> None:
         with self.lock:
@@ -194,20 +231,36 @@ class _Driver:
         self.save()
         self.log(f"phase: {phase}")
 
-    def supervise(self, name: str, cfg_path: Path) -> None:
+    def supervise(self, name: str, cfg_path: Path, workers: int) -> None:
+        try:
+            self._supervise(name, cfg_path, workers)
+        finally:
+            self._release(name, None)  # never leave a dead run at the front of the queue
+
+    def _supervise(self, name: str, cfg_path: Path, workers: int) -> None:
         entry = self.state["runs"][name]
         log_path = self.exp.dir / f"{name}.log"
         if entry["status"] == "done":
             return
         if alive(entry.get("pid")):  # left running by a previous driver: wait for it
             self.log(f"{name}: waiting for running pid {entry['pid']}")
+            with self.slots:
+                self.waiting.discard(name)
+                self.used += workers
             while alive(entry["pid"]):
                 time.sleep(10)
+            self._release(name, workers)
             entry["status"] = "done" if self._finished(entry.get("run_id")) else "crashed"
             self.save()
             if entry["status"] == "done":
                 return
-        while entry["attempts"] <= self.exp.cfg.max_resumes:
+        # Only crashes seen here count against max_resumes: a stop, or the machine going
+        # down, kills the driver too, and relaunching continues without using one up.
+        while entry.get("crashes", 0) <= self.exp.cfg.max_resumes:
+            if self.exp.cfg.max_workers is not None:
+                entry["status"] = "queued"
+                self.save()
+                self._acquire(name, workers)
             run_id = entry.get("run_id")
             has_state = (
                 bool(run_id)
@@ -239,13 +292,16 @@ class _Driver:
                 entry["status"] = "done"
                 self.save()
                 self.log(f"{name}: done")
+                self._release(name, workers)
                 return
             entry["status"] = "crashed"
+            entry["crashes"] = entry.get("crashes", 0) + 1
             self.save()
-            self.log(f"{name}: exited with {proc.returncode}")
+            self.log(f"{name}: exited with {proc.returncode} (crash {entry['crashes']})")
+            self._release(name, workers)
         entry["status"] = "failed"
         self.save()
-        self.log(f"{name}: FAILED after {entry['attempts']} attempts")
+        self.log(f"{name}: FAILED after {entry['crashes']} crashes")
 
     def _finished(self, run_id: str | None) -> bool:
         if not run_id:
@@ -259,9 +315,13 @@ class _Driver:
         self.log(f"driver pid {os.getpid()} for {self.exp.cfg.name}")
         if self.state.get("phase") not in ("analysis", "done"):
             self.set_phase("training")
+            # Register every unfinished run first, so the queue starts them in file order.
+            self.waiting = {n for n in self.exp.names if self.state["runs"][n]["status"] != "done"}
             threads = [
-                threading.Thread(target=self.supervise, args=(n, p), daemon=True)
-                for n, p in zip(self.exp.names, self.exp.run_paths, strict=True)
+                threading.Thread(target=self.supervise, args=(n, p, c.ppo.num_envs), daemon=True)
+                for n, p, c in zip(
+                    self.exp.names, self.exp.run_paths, self.exp.train_cfgs, strict=True
+                )
             ]
             for t in threads:
                 t.start()
